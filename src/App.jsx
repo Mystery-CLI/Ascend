@@ -532,8 +532,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Bottom nav. Tavern and Throne are public; the Rookery needs fealty. */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex h-14 max-w-[600px] items-stretch border-t border-border bg-background/90 backdrop-blur-md">
+      {/* Bottom nav. Tavern and Throne are public; the Rookery needs fealty.
+          `translateZ(0)` forces this onto its own compositing layer: without
+          it, iOS Safari can visually detach a `fixed` element mid-scroll
+          (it "floats" over the wrong content until the scroll settles). */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex h-14 max-w-[600px] items-stretch border-t border-border bg-background/90 backdrop-blur-md"
+        style={{ transform: "translateZ(0)", WebkitTransform: "translateZ(0)" }}
+      >
         <NavButton active={view === "tavern"} onClick={() => setView("tavern")} icon={Scroll} label="Tavern" />
         <NavButton active={view === "throne"} onClick={() => setView("throne")} icon={Crown} label="Throne" />
         <NavButton
