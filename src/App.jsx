@@ -398,6 +398,31 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/80 to-background" />
       </div>
 
+      {/* Desktop only: a left nav rail sits beside the content, X-style,
+          instead of the same 600px column floating alone in empty margin.
+          Hidden entirely below `lg`, so mobile/tablet render exactly as
+          before; the bottom nav further down takes over there instead. */}
+      <div className="mx-auto flex w-full max-w-4xl lg:items-start lg:gap-6">
+        <aside className="hidden shrink-0 lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-56 lg:flex-col lg:py-6 lg:pl-2">
+          <div className="flex items-center gap-2 px-3">
+            <Crown className="h-6 w-6 text-primary" />
+            <span className="font-display text-xl font-bold text-primary">Ascend</span>
+          </div>
+          <nav className="mt-6 flex flex-col gap-1">
+            <SidebarLink active={view === "tavern"} onClick={() => setView("tavern")} icon={Scroll} label="Tavern" />
+            <SidebarLink active={view === "throne"} onClick={() => setView("throne")} icon={Crown} label="Throne" />
+            <SidebarLink
+              active={view === "rookery"}
+              onClick={() =>
+                me ? setView("rookery") : setGate({ reason: "Enter the realm to open the Rookery." })
+              }
+              icon={Feather}
+              label="Rookery"
+            />
+          </nav>
+        </aside>
+
+        <div className="min-w-0 flex-1">
       {/* Standing bar: your crest, your rank, your renown (yours to see alone) */}
       <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-3">
@@ -531,13 +556,16 @@ export default function App() {
           <ThroneRoom me={me} onStanding={applyStanding} onGoToTavern={() => setView("tavern")} />
         </div>
       )}
+        </div>
+      </div>
 
-      {/* Bottom nav. Tavern and Throne are public; the Rookery needs fealty.
+      {/* Bottom nav: mobile/tablet only, replaced by the sidebar above `lg`.
+          Tavern and Throne are public; the Rookery needs fealty.
           `translateZ(0)` forces this onto its own compositing layer: without
           it, iOS Safari can visually detach a `fixed` element mid-scroll
           (it "floats" over the wrong content until the scroll settles). */}
       <nav
-        className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex h-14 max-w-[600px] items-stretch border-t border-border bg-background/90 backdrop-blur-md"
+        className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex h-14 max-w-[600px] items-stretch border-t border-border bg-background/90 backdrop-blur-md lg:hidden"
         style={{ transform: "translateZ(0)", WebkitTransform: "translateZ(0)" }}
       >
         <NavButton active={view === "tavern"} onClick={() => setView("tavern")} icon={Scroll} label="Tavern" />
@@ -618,6 +646,22 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** The desktop nav rail's own item: icon and label side by side, X-style. */
+function SidebarLink({ active, onClick, icon: Icon, label }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-3.5 rounded-full px-3 py-2.5 text-base font-medium transition",
+        active ? "text-primary" : "text-foreground/90 hover:bg-secondary/60"
+      )}
+    >
+      <Icon className={cn("h-6 w-6", active && "fill-primary/10")} />
+      {label}
+    </button>
   );
 }
 
