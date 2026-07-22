@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "motion/react";
-import { Crown, Loader2, ScrollText, Sparkles, ChevronUp } from "lucide-react";
+import { Loader2, ScrollText, Sparkles, ChevronUp } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { realm } from "@/lib/realm";
 import { RankBadge } from "@/components/RankBadge";
@@ -110,11 +110,9 @@ export function ThroneRoom({ me, onStanding, onGoToTavern }) {
         animate={{ opacity: 1, y: 0 }}
         className="relative overflow-hidden rounded-2xl border border-rank-monarch/40 bg-gradient-to-b from-rank-monarch/10 to-transparent p-6 text-center"
       >
-        <img
-          src="/art/crest-monarch.jpg"
-          alt=""
-          className="mx-auto mb-3 h-16 w-16 rounded-full object-cover ring-2 ring-rank-monarch/50"
-        />
+        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full ring-2 ring-rank-monarch/50">
+          <img src="/art/crest-monarch.jpg" alt="" className="h-full w-full object-cover" />
+        </div>
         <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Reigning Monarch</p>
         <p className="mt-1 font-display text-3xl font-bold text-rank-monarch">
           {monarch ? monarch.handle : "The throne stands empty"}

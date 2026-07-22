@@ -1,0 +1,14 @@
+{
+  "name": "Ascend",
+  "short_name": "Ascend",
+  "description": "Enter the realm a peasant. Rise, by wit and by favour, as far as the throne itself.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0e1a",
+  "theme_color": "#0d0e1a",
+  "icons": [
+    { "src": "/icon-180.jpg", "sizes": "180x180", "type": "image/jpeg" },
+    { "src": "/icon-192.jpg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any maskable" },
+    { "src": "/icon-512.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable" }
+  ]
+}
