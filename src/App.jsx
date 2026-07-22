@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Crown, LogOut, Loader2, ScrollText, Sparkles, ScrollText as Scroll, Feather } from "lucide-react";
+import { Crown, Loader2, ScrollText, Sparkles, ScrollText as Scroll, Feather, User } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { realm, pulse } from "@/lib/realm";
 import { hasFealty, markFealty, clearFealty } from "@/lib/session";
@@ -13,6 +13,7 @@ import { TidingCard } from "@/components/TidingCard";
 import { Composer } from "@/components/Composer";
 import { Rookery } from "@/components/Rookery";
 import { ThroneRoom } from "@/components/ThroneRoom";
+import { Profile } from "@/components/Profile";
 import { ToastHost } from "@/components/Toast";
 
 const FEED_LIMIT = 60;
@@ -129,6 +130,11 @@ export default function App() {
       cancelled = true;
     };
   }, [loadFeed]);
+
+  const logout = useCallback(() => {
+    clearFealty();
+    base44.auth.logout(window.location.origin);
+  }, []);
 
   // Called after a successful oath from the modal: bring the new subject in
   // without a jarring full-page reload.
@@ -419,6 +425,14 @@ export default function App() {
               icon={Feather}
               label="Rookery"
             />
+            {me && (
+              <SidebarLink
+                active={view === "profile"}
+                onClick={() => setView("profile")}
+                icon={User}
+                label="Your Crest"
+              />
+            )}
           </nav>
         </aside>
 
@@ -432,27 +446,15 @@ export default function App() {
           </div>
 
           {me ? (
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <span className="max-w-[9rem] truncate text-sm font-medium">{me.handle}</span>
-                  <RankBadge rank={me.rank} size="xs" />
-                </div>
-                <div className="tnum text-[11px] text-muted-foreground">
-                  {me.renown ?? 0} renown
-                </div>
+            <button onClick={() => setView("profile")} className="text-right" title="Your crest">
+              <div className="flex items-center justify-end gap-2">
+                <span className="max-w-[9rem] truncate text-sm font-medium">{me.handle}</span>
+                <RankBadge rank={me.rank} size="xs" />
               </div>
-              <button
-                onClick={() => {
-                  clearFealty();
-                  base44.auth.logout(window.location.origin);
-                }}
-                className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-                title="Leave the realm"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
+              <div className="tnum text-[11px] text-muted-foreground">
+                {me.renown ?? 0} renown
+              </div>
+            </button>
           ) : (
             <button
               onClick={() => setGate({ reason: "Enter the realm a peasant, and begin your climb." })}
@@ -554,6 +556,17 @@ export default function App() {
       {view === "throne" && (
         <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
           <ThroneRoom me={me} onStanding={applyStanding} onGoToTavern={() => setView("tavern")} />
+        </div>
+      )}
+
+      {view === "profile" && me && (
+        <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
+          <Profile
+            me={me}
+            user={user}
+            onUpdated={(patch) => setMe((prev) => ({ ...prev, ...patch }))}
+            onLogout={logout}
+          />
         </div>
       )}
         </div>
