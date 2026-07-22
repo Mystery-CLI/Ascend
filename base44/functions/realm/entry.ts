@@ -30,6 +30,41 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// The Decree is chosen from a fixed list, not typed freely, because each one
+// maps to something the server can actually check happened. That is what
+// closes the old loophole: Heed used to just be a button that paid out on
+// trust. Now it pays out only once the day's real record backs it up.
+const DECREES: Record<string, string> = {
+  post: "Post a tiding in the Tavern today.",
+  cheer3: "Cheer 3 tidings today.",
+  reply: "Reply to someone in the Tavern today.",
+  vote: "Vote in a poll today.",
+};
+
+async function decreeFulfilled(svc: any, me: any, decreeId: string, day: string): Promise<boolean> {
+  const since = `${day}T00:00:00.000Z`;
+  switch (decreeId) {
+    case "post": {
+      const rows = await svc.entities.Tiding.filter({ author_subject_id: me.id });
+      return rows.some((t: any) => t.created_date >= since);
+    }
+    case "cheer3": {
+      const rows = await svc.entities.Cheer.filter({ subject_id: me.id });
+      return rows.filter((c: any) => c.created_date >= since).length >= 3;
+    }
+    case "reply": {
+      const rows = await svc.entities.Reply.filter({ author_subject_id: me.id });
+      return rows.some((r: any) => r.created_date >= since);
+    }
+    case "vote": {
+      const rows = await svc.entities.Vote.filter({ subject_id: me.id });
+      return rows.some((v: any) => v.created_date >= since);
+    }
+    default:
+      return false;
+  }
+}
+
 Deno.serve(async (req) => {
   let base44;
   try {
@@ -121,32 +156,66 @@ Deno.serve(async (req) => {
       }
 
       const tiding = await svc.entities.Tiding.create(record);
-      const updated = await adjustRenown(svc, me.id, RENOWN.post);
-      return json({ tiding, renown: updated?.renown, rank: updated?.rank });
+      // Posting earns nothing on its own: renown only comes from someone else
+      // cheering it, or heeding the Monarch's Decree.
+      return json({ tiding, renown: me.renown, rank: me.rank });
     }
 
-    // -- cheer ---------------------------------------------------------------
+    // -- cheer: a tiding, or a reply beneath one ------------------------------
     if (action === "cheer") {
       const tidingId = payload.tiding_id;
-      if (!tidingId) return json({ error: "Which tiding?" }, 400);
+      const replyId = payload.reply_id;
+      if (!tidingId && !replyId) return json({ error: "Which tiding?" }, 400);
+
+      if (replyId) {
+        const reply = await svc.entities.Reply.get(replyId);
+        if (!reply) return json({ error: "No such reply." }, 404);
+
+        const existing = await svc.entities.Cheer.filter({ reply_id: replyId, subject_id: me.id });
+        if (existing.length > 0) {
+          await svc.entities.Cheer.delete(existing[0].id);
+          await svc.entities.Reply.update(replyId, {
+            cheers_count: Math.max(0, (reply.cheers_count || 0) - 1),
+          });
+          if (reply.author_subject_id && reply.author_subject_id !== me.id) {
+            await adjustRenown(svc, reply.author_subject_id, -RENOWN.cheerReceived);
+          }
+          return json({ cheered: false, renown: me.renown, rank: me.rank });
+        }
+
+        await svc.entities.Cheer.create({
+          tiding_id: reply.tiding_id,
+          reply_id: replyId,
+          subject_id: me.id,
+          user_email: user.email,
+        });
+        await svc.entities.Reply.update(replyId, {
+          cheers_count: (reply.cheers_count || 0) + 1,
+        });
+        if (reply.author_subject_id && reply.author_subject_id !== me.id) {
+          await adjustRenown(svc, reply.author_subject_id, RENOWN.cheerReceived);
+        }
+        // Cheering earns the cheerer nothing; only being cheered pays out.
+        return json({ cheered: true, renown: me.renown, rank: me.rank });
+      }
+
       const tiding = await svc.entities.Tiding.get(tidingId);
       if (!tiding) return json({ error: "No such tiding." }, 404);
 
-      const existing = await svc.entities.Cheer.filter({
-        tiding_id: tidingId,
-        subject_id: me.id,
-      });
+      // tiding_id is denormalized onto reply-cheers too, so filter by it alone
+      // would catch those as well; isolate the tiding's own cheer record.
+      const existing = await svc.entities.Cheer.filter({ tiding_id: tidingId, subject_id: me.id });
+      const ownCheer = existing.find((c: any) => !c.reply_id);
 
-      if (existing.length > 0) {
-        await svc.entities.Cheer.delete(existing[0].id);
+      if (ownCheer) {
+        await svc.entities.Cheer.delete(ownCheer.id);
         await svc.entities.Tiding.update(tidingId, {
           cheers_count: Math.max(0, (tiding.cheers_count || 0) - 1),
         });
         if (tiding.author_subject_id && tiding.author_subject_id !== me.id) {
           await adjustRenown(svc, tiding.author_subject_id, -RENOWN.cheerReceived);
         }
-        const meAfter = await adjustRenown(svc, me.id, -RENOWN.cheerGiven);
-        return json({ cheered: false, renown: meAfter?.renown, rank: meAfter?.rank });
+        return json({ cheered: false, renown: me.renown, rank: me.rank });
       }
 
       await svc.entities.Cheer.create({
@@ -160,13 +229,13 @@ Deno.serve(async (req) => {
       if (tiding.author_subject_id && tiding.author_subject_id !== me.id) {
         await adjustRenown(svc, tiding.author_subject_id, RENOWN.cheerReceived);
       }
-      const meAfter = await adjustRenown(svc, me.id, RENOWN.cheerGiven);
-      return json({ cheered: true, renown: meAfter?.renown, rank: meAfter?.rank });
+      return json({ cheered: true, renown: me.renown, rank: me.rank });
     }
 
-    // -- reply ---------------------------------------------------------------
+    // -- reply: to a tiding, or to another reply (nested, X-style) -----------
     if (action === "reply") {
       const tidingId = payload.tiding_id;
+      const parentReplyId = payload.parent_reply_id || undefined;
       const body = (payload.body || "").toString().trim();
       if (!tidingId || !body) return json({ error: "A reply needs words." }, 400);
       if (body.length > 400) return json({ error: "That reply is too long." }, 400);
@@ -174,21 +243,27 @@ Deno.serve(async (req) => {
       const tiding = await svc.entities.Tiding.get(tidingId);
       if (!tiding) return json({ error: "No such tiding." }, 404);
 
+      if (parentReplyId) {
+        const parent = await svc.entities.Reply.get(parentReplyId);
+        if (!parent || parent.tiding_id !== tidingId) {
+          return json({ error: "No such reply." }, 404);
+        }
+      }
+
       const reply = await svc.entities.Reply.create({
         tiding_id: tidingId,
+        parent_reply_id: parentReplyId,
         author_subject_id: me.id,
         author_email: user.email,
         author_handle: me.handle,
         body,
+        cheers_count: 0,
       });
       await svc.entities.Tiding.update(tidingId, {
         replies_count: (tiding.replies_count || 0) + 1,
       });
-      if (tiding.author_subject_id && tiding.author_subject_id !== me.id) {
-        await adjustRenown(svc, tiding.author_subject_id, RENOWN.replyReceived);
-      }
-      const meAfter = await adjustRenown(svc, me.id, RENOWN.replyGiven);
-      return json({ reply, renown: meAfter?.renown, rank: meAfter?.rank });
+      // Replying earns nothing on its own, same as posting.
+      return json({ reply, renown: me.renown, rank: me.rank });
     }
 
     // -- vote: cast a ballot on a poll ---------------------------------------
@@ -222,11 +297,8 @@ Deno.serve(async (req) => {
       votes[idx] = (votes[idx] || 0) + 1;
       await svc.entities.Tiding.update(tiding.id, { poll_votes: votes });
 
-      if (tiding.author_subject_id && tiding.author_subject_id !== me.id) {
-        await adjustRenown(svc, tiding.author_subject_id, RENOWN.voteReceived);
-      }
-      const meAfter = await adjustRenown(svc, me.id, RENOWN.voteGiven);
-      return json({ voted: true, option_index: idx, poll_votes: votes, renown: meAfter?.renown, rank: meAfter?.rank });
+      // Voting earns nothing on its own, same as posting and replying.
+      return json({ voted: true, option_index: idx, poll_votes: votes, renown: me.renown, rank: me.rank });
     }
 
     // -- champion: a Knight's power to lift a tiding to the top --------------
@@ -284,31 +356,39 @@ Deno.serve(async (req) => {
       return json({ granted: amount, target_rank: after?.rank });
     }
 
-    // -- decree: the Monarch sets a task for the whole realm -----------------
+    // -- decree: the Monarch picks a task for the whole realm ----------------
     if (action === "decree") {
       if (me.rank !== "monarch") {
         return json({ error: "Only the Monarch may issue a Decree." }, 403);
       }
-      const text = (payload.text || "").toString().trim().slice(0, 140);
-      if (!text) return json({ error: "A Decree needs words." }, 400);
+      const decreeId = (payload.decree_id || "").toString();
+      const text = DECREES[decreeId];
+      if (!text) return json({ error: "No such Decree." }, 400);
       const crowns = await svc.entities.Crown.list("", 1);
+      const fields = { decree: text, decree_id: decreeId, decree_day: todayStr() };
       if (crowns[0]) {
-        await svc.entities.Crown.update(crowns[0].id, { decree: text, decree_day: todayStr() });
+        await svc.entities.Crown.update(crowns[0].id, fields);
       } else {
-        await svc.entities.Crown.create({ decree: text, decree_day: todayStr() });
+        await svc.entities.Crown.create(fields);
       }
       return json({ ok: true, decree: text });
     }
 
-    // -- heed: any subject answers the Decree for a daily bonus --------------
+    // -- heed: any subject claims the Decree's bonus, once they have actually
+    //    done it. The old version paid out on a bare click; this one checks
+    //    today's real record (a post, cheers, a reply, a vote) before paying.
     if (action === "heed") {
       const crowns = await svc.entities.Crown.list("", 1);
       const crown = crowns[0];
-      if (!crown?.decree || crown.decree_day !== todayStr()) {
+      if (!crown?.decree_id || crown.decree_day !== todayStr()) {
         return json({ error: "No Decree stands today." }, 400);
       }
       if (me.heeded_day === todayStr()) {
         return json({ already: true, error: "You have already heeded today's Decree." }, 400);
+      }
+      const done = await decreeFulfilled(svc, me, crown.decree_id, crown.decree_day);
+      if (!done) {
+        return json({ error: "You have not yet done today's Decree." }, 400);
       }
       const after = await adjustRenown(svc, me.id, HEED_BONUS);
       await svc.entities.Subject.update(me.id, { heeded_day: todayStr() });

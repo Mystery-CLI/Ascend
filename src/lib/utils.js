@@ -11,7 +11,13 @@ export function plural(n, one, many) {
 /** Short relative time: "just now", "4m", "2h", "3d". */
 export function timeAgo(iso) {
   if (!iso) return "";
-  const then = new Date(iso).getTime();
+  // Base44's own auto-managed created_date comes back with no timezone
+  // suffix ("2026-07-22T11:33:06.631000"), a naive string that is really
+  // UTC. Without this, the browser parses it as LOCAL time, and every
+  // "just now" reads as however far the viewer's clock sits from UTC (an
+  // hour, for a UTC+1 viewer, right when a tiding is first posted).
+  const hasZone = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
+  const then = new Date(hasZone ? iso : `${iso}Z`).getTime();
   const secs = Math.max(0, (Date.now() - then) / 1000);
   if (secs < 45) return "just now";
   if (secs < 3600) return `${Math.round(secs / 60)}m`;

@@ -18,9 +18,7 @@ import {
   jsonResponse as json,
 } from "../../shared/renown.ts";
 
-function reignEnd(wk: number): string {
-  return new Date((wk + 1) * 7 * 86400000).toISOString();
-}
+const REIGN_MS = 7 * 24 * 60 * 60 * 1000; // a reign lasts 7 real days from crowning
 
 Deno.serve(async (req) => {
   let base44;
@@ -33,7 +31,11 @@ Deno.serve(async (req) => {
   const user = await base44.auth.me().catch(() => null);
 
   try {
-    const subjects = await svc.entities.Subject.list("", 1000);
+    const allSubjects = await svc.entities.Subject.list("", 1000);
+    // The AI populace never competes for standing or the crown, only real
+    // subjects do. Filtered out here, once, so nothing downstream can leak them.
+    const subjects = allSubjects.filter((s) => !s.is_ai);
+
     // Rank the realm by this week's renown; total renown breaks ties.
     const ranked = [...subjects].sort((a, b) => {
       const w = effectiveWeekRenown(b) - effectiveWeekRenown(a);
@@ -44,8 +46,16 @@ Deno.serve(async (req) => {
     const crowns = await svc.entities.Crown.list("", 1);
     let crown = crowns[0] || null;
 
-    // Re-crown if the week has turned (or no one reigns yet).
-    const needCrown = !crown || crown.week_key !== wk || !crown.monarch_id;
+    // An AI citizen may already hold the crown from before this filter existed.
+    // Treat that the same as no monarch at all, so the realm self-heals now
+    // instead of waiting for the reign to end.
+    const monarchIsAi = !!crown?.monarch_id && !!allSubjects.find((s) => s.id === crown.monarch_id)?.is_ai;
+
+    // Re-crown once the CURRENT reign's own 7 days are up, not when some
+    // unrelated global week boundary ticks over. reign_ends_at is set below,
+    // always 7 real days from the moment someone was actually crowned.
+    const reignExpired = !!crown?.reign_ends_at && Date.now() >= new Date(crown.reign_ends_at).getTime();
+    const needCrown = !crown || !crown.monarch_id || monarchIsAi || reignExpired;
     if (needCrown) {
       const leader = ranked.find((s) => effectiveWeekRenown(s) > 0) || ranked[0];
 
@@ -65,7 +75,7 @@ Deno.serve(async (req) => {
           monarch_id: leader.id,
           monarch_handle: leader.handle,
           crowned_at: new Date().toISOString(),
-          reign_ends_at: reignEnd(wk),
+          reign_ends_at: new Date(Date.now() + REIGN_MS).toISOString(),
           week_key: wk,
         };
         crown = crown
@@ -76,21 +86,36 @@ Deno.serve(async (req) => {
       }
     }
 
-    const me = user ? await findSubjectByEmail(svc, user.email) : null;
-    const myPosition = me ? ranked.findIndex((s) => s.id === me.id) + 1 : 0;
-
     const monarchId = crown?.monarch_id;
-    const leaderboard = ranked.slice(0, 12).map((s, i) => ({
-      position: i + 1,
-      subject_id: s.id,
-      handle: s.handle,
-      // Reflect the just-crowned monarch even though `ranked` predates the update.
-      rank: s.id === monarchId ? "monarch" : s.rank,
-      is_ai: !!s.is_ai,
-    }));
+
+    // The reigning monarch holds position 1 for the whole reign, no matter how
+    // weekly renown shifts among everyone else in the meantime. Re-sorting
+    // `ranked` by live renown would let a challenger displace them early, and
+    // the crown only changes hands when the week turns over above.
+    const standing = monarchId
+      ? [...ranked.filter((s) => s.id === monarchId), ...ranked.filter((s) => s.id !== monarchId)]
+      : ranked;
+
+    const me = user ? await findSubjectByEmail(svc, user.email) : null;
+    const myPosition = me ? standing.findIndex((s) => s.id === me.id) + 1 : 0;
+
+    // The standings list itself excludes the monarch: they are already shown,
+    // permanently on top, in their own Throne card above this list. Public
+    // display stops at 50 regardless of how many real subjects the realm has;
+    // everyone still gets their own private position via my_position below,
+    // whether they're in this list or not.
+    const leaderboard = standing
+      .filter((s) => s.id !== monarchId)
+      .slice(0, 50)
+      .map((s, i) => ({
+        position: monarchId ? i + 2 : i + 1,
+        subject_id: s.id,
+        handle: s.handle,
+        rank: s.rank,
+      }));
 
     const nobles = ranked
-      .filter((s) => s.rank === "noble")
+      .filter((s) => s.rank === "noble" && s.id !== monarchId)
       .slice(0, 6)
       .map((s) => ({ subject_id: s.id, handle: s.handle }));
 
@@ -103,7 +128,13 @@ Deno.serve(async (req) => {
             reign_ends_at: crown.reign_ends_at,
           }
         : null,
-      decree: crown?.decree && crown.decree_day ? { text: crown.decree, day: crown.decree_day } : null,
+      // A Decree from before this fix has text but no decree_id, so it cannot
+      // be verified. Treat it as no Decree rather than show one Heed can never
+      // pay out on.
+      decree:
+        crown?.decree && crown.decree_id && crown.decree_day
+          ? { text: crown.decree, day: crown.decree_day }
+          : null,
       leaderboard,
       nobles,
       my_position: myPosition,

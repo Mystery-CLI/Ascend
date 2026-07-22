@@ -4,23 +4,24 @@
 // award renown and re-derive rank, so the numbers and the thresholds live here,
 // in one place, rather than drifting between two copies.
 
+// Posting, cheering, replying, and voting earn nothing on their own: renown
+// is earned, not spent by merely showing up. The only ways to gain it are (1)
+// someone ELSE cheering your tiding or reply, and (2) heeding the Monarch's
+// Decree. Bounty is a separate, deliberate Noble grant, not a participation
+// reward.
 export const RENOWN = {
-  post: 2, // author, for posting a tiding
-  cheerReceived: 5, // author, when someone cheers their tiding
-  cheerGiven: 1, // the cheerer, for taking part
-  replyReceived: 4, // author, when someone replies to their tiding
-  replyGiven: 1, // the replier, for taking part
-  voteReceived: 2, // poll author, when someone votes on their poll
-  voteGiven: 1, // the voter, for taking part
+  cheerReceived: 5, // author, when someone else cheers their tiding or reply
   bountyMin: 15, // smallest bounty a Noble may grant
   bountyMax: 40, // largest
 };
 
 // Rank thresholds by renown. Monarch is NOT reached this way, it is the weekly
 // crown, so the climb by renown tops out at Noble.
+// Each tier costs 10x the last, so climbing past Freeman is a real grind, not
+// a formality. Monarch is not on this ladder: it is won weekly, not earned.
 export const THRESHOLDS = [
-  { rank: "noble", at: 600 },
-  { rank: "knight", at: 200 },
+  { rank: "noble", at: 5000 },
+  { rank: "knight", at: 500 },
   { rank: "freeman", at: 50 },
   { rank: "peasant", at: 0 },
 ];

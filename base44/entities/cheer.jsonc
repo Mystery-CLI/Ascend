@@ -1,15 +1,22 @@
-// Cheer: raising a tankard to a tiding (a like).
+// Cheer: raising a tankard to a tiding, or to a reply beneath it (a like).
 //
-// One cheer per subject per tiding. The record itself is public (so the UI can
-// show who has cheered and highlight your own), but the renown it grants to the
-// tiding's author is awarded by the server, not by this record's existence.
+// One cheer per subject per target. tiding_id is always set, even when
+// cheering a reply, so a client can fetch "everything I've cheered under this
+// tiding" in one filter; reply_id is set only when the target is a reply, not
+// the tiding itself. The record is public (so the UI can highlight your own),
+// but the renown it grants is awarded by the server, not by the record's
+// existence, and only ever to whoever was cheered, never to the cheerer.
 {
   "name": "Cheer",
   "type": "object",
   "properties": {
     "tiding_id": {
       "type": "string",
-      "description": "The tiding being cheered."
+      "description": "The tiding this cheer belongs to (set even when reply_id is set)."
+    },
+    "reply_id": {
+      "type": "string",
+      "description": "If set, this cheer targets a reply rather than the tiding itself."
     },
     "subject_id": {
       "type": "string",

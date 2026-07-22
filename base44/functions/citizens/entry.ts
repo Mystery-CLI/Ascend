@@ -243,10 +243,8 @@ Deno.serve(async (req) => {
       await svc.entities.Tiding.update(target.id, {
         replies_count: (target.replies_count || 0) + 1,
       });
-      // The real author earns renown for drawing a citizen's reply.
-      if (target.author_subject_id && !citizenIds.has(target.author_subject_id)) {
-        await adjustRenown(svc, target.author_subject_id, RENOWN.replyReceived);
-      }
+      // A reply earns nothing on its own now, from a citizen or a real
+      // subject alike; only being cheered does.
 
       return json({ acted: true, by: speaker.handle, on: target.id });
     }

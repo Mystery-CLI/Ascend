@@ -6,12 +6,14 @@ import { realm, pulse } from "@/lib/realm";
 import { hasFealty, markFealty, clearFealty } from "@/lib/session";
 import { rankMeta, climbProgress } from "@/lib/ranks";
 import { cn } from "@/lib/utils";
+import { notify } from "@/lib/toast";
 import { FealtyGate } from "@/components/FealtyGate";
 import { RankBadge } from "@/components/RankBadge";
 import { TidingCard } from "@/components/TidingCard";
 import { Composer } from "@/components/Composer";
 import { Rookery } from "@/components/Rookery";
 import { ThroneRoom } from "@/components/ThroneRoom";
+import { ToastHost } from "@/components/Toast";
 
 const FEED_LIMIT = 60;
 const POLL_MS = 8000;
@@ -23,6 +25,7 @@ export default function App() {
   const [tidings, setTidings] = useState([]);
   const [subjects, setSubjects] = useState({}); // id -> Subject (public rank)
   const [myCheers, setMyCheers] = useState(new Set());
+  const [myReplyCheers, setMyReplyCheers] = useState(new Set());
   const [myVotes, setMyVotes] = useState(new Map()); // tiding_id -> option_index
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
@@ -79,7 +82,8 @@ export default function App() {
         base44.entities.Cheer.filter({ subject_id: mine.id }).catch(() => []),
         base44.entities.Vote.filter({ subject_id: mine.id }).catch(() => []),
       ]);
-      setMyCheers(new Set(cheers.map((c) => c.tiding_id)));
+      setMyCheers(new Set(cheers.filter((c) => !c.reply_id).map((c) => c.tiding_id)));
+      setMyReplyCheers(new Set(cheers.filter((c) => c.reply_id).map((c) => c.reply_id)));
       setMyVotes(new Map(votes.map((v) => [v.tiding_id, v.option_index])));
       // Refresh my own standing (renown is private but readable to me).
       const fresh = map[mine.id];
@@ -216,7 +220,7 @@ export default function App() {
       });
       return true;
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
       return false;
     } finally {
       setPosting(false);
@@ -243,7 +247,7 @@ export default function App() {
       }
       applyStanding(res);
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
       await loadFeed();
     }
   };
@@ -256,7 +260,7 @@ export default function App() {
       await loadFeed();
       return res;
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
     }
   };
 
@@ -269,8 +273,7 @@ export default function App() {
   const bounty = async (subjectId) => {
     const res = await runPower("bounty", () => realm("bounty", { subject_id: subjectId }));
     if (res?.granted) {
-      // A quiet confirmation; the recipient's rise shows in the feed.
-      setTimeout(() => alert(`Bounty granted: +${res.granted} renown to a commoner of the realm.`), 50);
+      notify(`Bounty granted: +${res.granted} renown to a commoner of the realm.`, "success");
     }
   };
 
@@ -296,24 +299,54 @@ export default function App() {
       const res = await realm("cheer", { tiding_id: tidingId });
       applyStanding(res);
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
       await loadFeed(); // reconcile on failure
     } finally {
       setBusy(false);
     }
   };
 
-  const reply = async (tidingId, body) => {
+  const reply = async (tidingId, body, parentReplyId) => {
     if (!requireFealty("Add your voice? Swear fealty and the tavern will hear you.")) {
       throw new Error("fealty required"); // stops the card's local submit spinner
     }
-    const res = await realm("reply", { tiding_id: tidingId, body });
-    applyStanding(res);
+    const res = await realm("reply", { tiding_id: tidingId, body, parent_reply_id: parentReplyId });
     setTidings((prev) =>
       prev.map((t) =>
         t.id === tidingId ? { ...t, replies_count: (t.replies_count || 0) + 1 } : t
       )
     );
+    return res.reply;
+  };
+
+  // Cheering a reply, X-style: same optimistic-Set pattern as cheering a
+  // tiding, but the reply's own cheers_count lives inside TidingCard's local
+  // replies list, so that count is updated there, not here.
+  const cheerReply = async (replyId) => {
+    if (!requireFealty("Raise a tankard? Enter the realm first, and your cheer will count.")) {
+      throw new Error("fealty required");
+    }
+    if (busy) return;
+    setBusy(true);
+    const had = myReplyCheers.has(replyId);
+    setMyReplyCheers((prev) => {
+      const next = new Set(prev);
+      had ? next.delete(replyId) : next.add(replyId);
+      return next;
+    });
+    try {
+      await realm("cheer", { reply_id: replyId });
+    } catch (err) {
+      notify(err.message);
+      setMyReplyCheers((prev) => {
+        const next = new Set(prev);
+        had ? next.add(replyId) : next.delete(replyId);
+        return next;
+      });
+      throw err;
+    } finally {
+      setBusy(false);
+    }
   };
 
   /* ---- ordering -------------------------------------------------------- */
@@ -350,6 +383,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
+      <ToastHost />
+
       {/* A painted backdrop for the current room, kept faint and darkened so the
           feed stays readable. This is what gives Ascend its painterly kingdom
           feel without fighting the content. */}
@@ -470,6 +505,8 @@ export default function App() {
                   onVote={vote}
                   onMessageSubject={(id) => messageSubject(subjects[id])}
                   busy={busy}
+                  myReplyCheers={myReplyCheers}
+                  onCheerReply={cheerReply}
                 />
               ))}
             </AnimatePresence>

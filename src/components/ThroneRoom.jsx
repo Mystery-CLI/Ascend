@@ -5,6 +5,7 @@ import { base44 } from "@/api/base44Client";
 import { realm } from "@/lib/realm";
 import { RankBadge } from "@/components/RankBadge";
 import { cn } from "@/lib/utils";
+import { notify } from "@/lib/toast";
 
 /**
  * The Throne Room: the state of the realm in one view. Who reigns and for how
@@ -14,10 +15,21 @@ import { cn } from "@/lib/utils";
  * The Crown is disciplined here: opening this view calls the crown function,
  * which re-crowns whoever tops the week if the week has turned.
  */
+// The same fixed, verifiable Decrees the server accepts (realm/entry.ts
+// DECREES). A free-text Decree can't be checked, so the Monarch picks from
+// this list, and Heed only pays out once the server sees the day's real
+// record backing it up.
+const DECREE_OPTIONS = [
+  { id: "post", label: "Post a tiding in the Tavern today." },
+  { id: "cheer3", label: "Cheer 3 tidings today." },
+  { id: "reply", label: "Reply to someone in the Tavern today." },
+  { id: "vote", label: "Vote in a poll today." },
+];
+
 export function ThroneRoom({ me, onStanding }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [decreeDraft, setDecreeDraft] = useState("");
+  const [decreeChoice, setDecreeChoice] = useState(DECREE_OPTIONS[0].id);
   const [busy, setBusy] = useState(false);
   const [heeded, setHeeded] = useState(false);
 
@@ -46,7 +58,7 @@ export function ThroneRoom({ me, onStanding }) {
       setHeeded(true);
       onStanding?.(res);
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
     } finally {
       setBusy(false);
     }
@@ -54,15 +66,12 @@ export function ThroneRoom({ me, onStanding }) {
 
   const issueDecree = async (e) => {
     e.preventDefault();
-    const text = decreeDraft.trim();
-    if (!text) return;
     setBusy(true);
     try {
-      await realm("decree", { text });
-      setDecreeDraft("");
+      await realm("decree", { decree_id: decreeChoice });
       await load();
     } catch (err) {
-      alert(err.message);
+      notify(err.message);
     } finally {
       setBusy(false);
     }
@@ -110,21 +119,37 @@ export function ThroneRoom({ me, onStanding }) {
         </div>
 
         {isMonarch ? (
-          <form onSubmit={issueDecree} className="space-y-2">
-            <input
-              value={decreeDraft}
-              onChange={(e) => setDecreeDraft(e.target.value.slice(0, 140))}
-              placeholder={decree?.text || "Decree a task for your realm..."}
-              className="h-11 w-full rounded-xl border border-border bg-background/60 px-3 text-sm focus:border-primary/60 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy || !decreeDraft.trim()}
-              className="h-10 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              {busy ? "…" : "Issue Decree"}
-            </button>
-          </form>
+          <div>
+            {/* The Monarch always sees this form, so without this line there
+                was never any sign a tap actually did anything. */}
+            {decree ? (
+              <p className="mb-2.5 text-[13px] text-muted-foreground">
+                Standing today: <span className="italic text-foreground/90">&ldquo;{decree.text}&rdquo;</span>
+              </p>
+            ) : (
+              <p className="mb-2.5 text-[13px] text-muted-foreground">No Decree stands yet today.</p>
+            )}
+            <form onSubmit={issueDecree} className="space-y-2">
+              <select
+                value={decreeChoice}
+                onChange={(e) => setDecreeChoice(e.target.value)}
+                className="h-11 w-full rounded-xl border border-border bg-background/60 px-3 text-sm focus:border-primary/60 focus:outline-none"
+              >
+                {DECREE_OPTIONS.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                disabled={busy}
+                className="h-10 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {busy ? "…" : decree ? "Issue a new Decree" : "Issue Decree"}
+              </button>
+            </form>
+          </div>
         ) : decree ? (
           <>
             <p className="text-[15px] italic text-foreground/90">&ldquo;{decree.text}&rdquo;</p>

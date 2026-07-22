@@ -8,8 +8,8 @@
 export const RANKS = {
   peasant: { key: "peasant", label: "Peasant", threshold: 0, color: "rank-peasant", order: 0 },
   freeman: { key: "freeman", label: "Freeman", threshold: 50, color: "rank-freeman", order: 1 },
-  knight: { key: "knight", label: "Knight", threshold: 200, color: "rank-knight", order: 2 },
-  noble: { key: "noble", label: "Noble", threshold: 600, color: "rank-noble", order: 3 },
+  knight: { key: "knight", label: "Knight", threshold: 500, color: "rank-knight", order: 2 },
+  noble: { key: "noble", label: "Noble", threshold: 5000, color: "rank-noble", order: 3 },
   monarch: { key: "monarch", label: "Monarch", threshold: null, color: "rank-monarch", order: 4 },
 };
 

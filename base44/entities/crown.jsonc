@@ -12,7 +12,8 @@
     "crowned_at": { "type": "string", "format": "date-time" },
     "reign_ends_at": { "type": "string", "format": "date-time" },
     "week_key": { "type": "number", "description": "The week this reign belongs to." },
-    "decree": { "type": "string", "maxLength": 140, "description": "The King's standing Decree." },
+    "decree": { "type": "string", "maxLength": 140, "description": "The King's standing Decree (display text)." },
+    "decree_id": { "type": "string", "description": "Which fixed, verifiable Decree is active. See realm/entry.ts DECREES." },
     "decree_day": { "type": "string", "description": "The day the current Decree was set." }
   },
   "rls": {

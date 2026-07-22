@@ -1,12 +1,44 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { MessageCircle, Loader2, Megaphone, Star, Coins } from "lucide-react";
+import { MessageCircle, Loader2, Megaphone, Star, Coins, X } from "lucide-react";
 import { RankBadge } from "@/components/RankBadge";
 import { MediaGrid } from "@/components/MediaGrid";
 import { Poll } from "@/components/Poll";
 import { base44 } from "@/api/base44Client";
 import { rankMeta } from "@/lib/ranks";
 import { cn, timeAgo } from "@/lib/utils";
+
+const EMPTY_SET = new Set();
+
+// Plain-language explanations shown before Champion, Proclaim, or Bounty
+// fires, since all three are once-a-day and act on someone beyond just you.
+const POWER_INFO = {
+  champion: {
+    icon: Star,
+    tone: "text-primary",
+    confirmBg: "bg-primary",
+    title: "Champion this tiding?",
+    body: () => "It gets lifted to the top of the Tavern for 6 hours, so the whole realm sees it first. You can only Champion once a day.",
+    confirmLabel: "Champion it",
+  },
+  proclaim: {
+    icon: Megaphone,
+    tone: "text-rank-noble",
+    confirmBg: "bg-rank-noble",
+    title: "Proclaim this tiding?",
+    body: () => "It gets pinned above every other tiding in the Tavern, kingdom-wide, until you (or another Noble) proclaim again. You can only Proclaim once a day.",
+    confirmLabel: "Proclaim it",
+  },
+  bounty: {
+    icon: Coins,
+    tone: "text-rank-knight",
+    confirmBg: "bg-rank-knight",
+    title: "Grant a Bounty?",
+    body: (handle) =>
+      `${handle || "This commoner"} gets a random 15–40 renown, straight from you, no questions asked. You can only grant one Bounty a day.`,
+    confirmLabel: "Grant it",
+  },
+};
 
 /**
  * One tiding, laid out the way X lays out a post: an avatar in the left gutter,
@@ -33,6 +65,8 @@ export function TidingCard({
   onVote,
   onMessageSubject,
   busy,
+  myReplyCheers = EMPTY_SET,
+  onCheerReply,
 }) {
   const [open, setOpen] = useState(false);
   const [replies, setReplies] = useState(null);
@@ -40,6 +74,23 @@ export function TidingCard({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [powerBusy, setPowerBusy] = useState(false);
+  const [confirming, setConfirming] = useState(null); // "champion" | "proclaim" | null
+  const [replyingTo, setReplyingTo] = useState(null); // { id, handle } | null, for nested replies
+  const composerRef = useRef(null);
+
+  // Group the flat reply list into a tree, X-style: a reply can itself be
+  // replied to, so this is keyed by parent_reply_id (null for a reply that
+  // answers the tiding directly).
+  const byParent = useMemo(() => {
+    const map = new Map();
+    for (const r of replies || []) {
+      const key = r.parent_reply_id || null;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    }
+    return map;
+  }, [replies]);
+  const rootReplies = byParent.get(null) || [];
 
   const rank = author?.rank || "peasant";
   const handle = author?.handle || tiding.author_handle || "Unknown";
@@ -83,15 +134,42 @@ export function TidingCard({
     if (!body) return;
     setSending(true);
     try {
-      await onReply(tiding.id, body);
+      const newReply = await onReply(tiding.id, body, replyingTo?.id);
       setDraft("");
-      const rows = await base44.entities.Reply.filter({ tiding_id: tiding.id }, "created_date");
-      setReplies(rows);
+      setReplyingTo(null);
+      if (newReply) setReplies((prev) => [...(prev || []), newReply]);
       if (!open) setOpen(true);
     } catch {
       /* gate opened or realm refused; keep the draft */
     } finally {
       setSending(false);
+    }
+  };
+
+  const startReplyTo = (r) => {
+    setReplyingTo({ id: r.id, handle: r.author_handle });
+    if (!open) setOpen(true);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  // Cheering a reply: the "have I cheered" Set lives in App (so it can be
+  // fetched once for the whole feed), but the reply's own count only lives
+  // here, in this card's local replies list.
+  const cheerReply = async (replyId) => {
+    const had = myReplyCheers.has(replyId);
+    setReplies((prev) =>
+      (prev || []).map((r) =>
+        r.id === replyId ? { ...r, cheers_count: Math.max(0, (r.cheers_count || 0) + (had ? -1 : 1)) } : r
+      )
+    );
+    try {
+      await onCheerReply?.(replyId);
+    } catch {
+      setReplies((prev) =>
+        (prev || []).map((r) =>
+          r.id === replyId ? { ...r, cheers_count: Math.max(0, (r.cheers_count || 0) + (had ? 1 : -1)) } : r
+        )
+      );
     }
   };
 
@@ -181,6 +259,7 @@ export function TidingCard({
                 activeColor="text-primary"
                 fill={cheered}
                 label="Cheer"
+                iconSize="h-5 w-5"
               />
             </div>
             <div className="ml-auto flex items-center gap-0.5">
@@ -190,7 +269,7 @@ export function TidingCard({
                   icon={Star}
                   label="Champion"
                   tone="text-primary hover:bg-primary/10"
-                  onClick={() => wield(() => onChampion(tiding.id))}
+                  onClick={() => setConfirming("champion")}
                   disabled={powerBusy}
                 />
               )}
@@ -199,7 +278,7 @@ export function TidingCard({
                   icon={Megaphone}
                   label="Proclaim"
                   tone="text-rank-noble hover:bg-rank-noble/10"
-                  onClick={() => wield(() => onProclaim(tiding.id))}
+                  onClick={() => setConfirming("proclaim")}
                   disabled={powerBusy}
                 />
               )}
@@ -208,12 +287,74 @@ export function TidingCard({
                   icon={Coins}
                   label="Bounty"
                   tone="text-rank-knight hover:bg-rank-knight/10"
-                  onClick={() => wield(() => onBounty(author.id))}
+                  onClick={() => setConfirming("bounty")}
                   disabled={powerBusy}
                 />
               )}
             </div>
           </div>
+
+          {/* A plain-language confirm before wielding Champion, Proclaim, or
+              Bounty: all three act on someone beyond just you and are
+              once-a-day, so a tap should not fire them by accident. */}
+          <AnimatePresence>
+            {confirming && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) setConfirming(null);
+                }}
+              >
+                <motion.div
+                  initial={{ scale: 0.92, y: 12 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.92, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 22 }}
+                  className="w-full max-w-xs rounded-3xl border border-border bg-card p-6 text-center"
+                >
+                  {(() => {
+                    const info = POWER_INFO[confirming];
+                    const Icon = info.icon;
+                    return (
+                      <>
+                        <Icon className={cn("mx-auto mb-3 h-8 w-8", info.tone)} />
+                        <p className="font-display text-lg font-bold text-foreground">{info.title}</p>
+                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{info.body(handle)}</p>
+                        <div className="mt-5 flex gap-2">
+                          <button
+                            onClick={() => setConfirming(null)}
+                            className="h-10 flex-1 rounded-xl bg-secondary text-sm font-medium text-foreground transition hover:brightness-110"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => {
+                              const which = confirming;
+                              setConfirming(null);
+                              wield(() => {
+                                if (which === "champion") return onChampion(tiding.id);
+                                if (which === "proclaim") return onProclaim(tiding.id);
+                                return onBounty(author.id);
+                              });
+                            }}
+                            className={cn(
+                              "h-10 flex-1 rounded-xl text-sm font-semibold text-primary-foreground transition hover:brightness-110",
+                              info.confirmBg
+                            )}
+                          >
+                            {info.confirmLabel}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Replies */}
           <AnimatePresence initial={false}>
@@ -233,44 +374,49 @@ export function TidingCard({
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     </div>
                   ) : (
-                    (replies || []).map((r) => (
-                      <div key={r.id} className="flex gap-2">
-                        <button
-                          onClick={() => onMessageSubject?.(r.author_subject_id)}
-                          className="h-8 shrink-0"
-                          title={`Send ${r.author_handle} a raven`}
-                        >
-                          <Avatar url={null} handle={r.author_handle} small />
-                        </button>
-                        <div className="min-w-0 flex-1">
-                          <button
-                            onClick={() => onMessageSubject?.(r.author_subject_id)}
-                            className="max-w-full truncate text-[13px] font-semibold hover:underline"
-                          >
-                            {r.author_handle}
-                          </button>
-                          <p className="break-words text-sm leading-snug text-foreground/80">
-                            {r.body}
-                          </p>
-                        </div>
-                      </div>
+                    rootReplies.map((r) => (
+                      <ReplyRow
+                        key={r.id}
+                        reply={r}
+                        byParent={byParent}
+                        myReplyCheers={myReplyCheers}
+                        onCheerReply={cheerReply}
+                        onReplyTo={startReplyTo}
+                        onMessageSubject={onMessageSubject}
+                        busy={busy}
+                      />
                     ))
                   )}
 
-                  <form onSubmit={submitReply} className="flex items-center gap-2 pt-0.5">
-                    <input
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Reply to this tiding..."
-                      className="h-9 min-w-0 flex-1 rounded-full border border-border bg-background/40 px-3.5 text-sm focus:border-primary/60 focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      disabled={sending || !draft.trim()}
-                      className="flex h-9 shrink-0 items-center rounded-full bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
-                    >
-                      {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
-                    </button>
+                  <form onSubmit={submitReply} className="space-y-1.5 pt-0.5">
+                    {replyingTo && (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        Replying to <span className="font-medium text-foreground/80">@{replyingTo.handle}</span>
+                        <button
+                          type="button"
+                          onClick={() => setReplyingTo(null)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={composerRef}
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        placeholder={replyingTo ? `Reply to @${replyingTo.handle}...` : "Reply to this tiding..."}
+                        className="h-9 min-w-0 flex-1 rounded-full border border-border bg-background/40 px-3.5 text-sm focus:border-primary/60 focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={sending || !draft.trim()}
+                        className="flex h-9 shrink-0 items-center rounded-full bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
+                      >
+                        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
+                      </button>
+                    </div>
                   </form>
                 </div>
               </motion.div>
@@ -283,7 +429,18 @@ export function TidingCard({
 }
 
 /** An X-style engagement action: icon in a circular hover pad, count beside it. */
-function Action({ icon: Icon, count, onClick, disabled, hoverColor, active, activeColor, fill, label }) {
+function Action({
+  icon: Icon,
+  count,
+  onClick,
+  disabled,
+  hoverColor,
+  active,
+  activeColor,
+  fill,
+  label,
+  iconSize = "h-[18px] w-[18px]",
+}) {
   return (
     <button
       onClick={onClick}
@@ -295,7 +452,7 @@ function Action({ icon: Icon, count, onClick, disabled, hoverColor, active, acti
       )}
     >
       <span className={cn("-m-1.5 rounded-full p-1.5 transition-colors", hoverColor)}>
-        <Icon className={cn("h-[18px] w-[18px]", fill && "fill-current")} />
+        <Icon className={cn(iconSize, fill && "fill-current")} />
       </span>
       {count > 0 && <span className="tnum">{count}</span>}
     </button>
@@ -332,13 +489,85 @@ function PowerButton({ icon: Icon, label, tone, onClick, disabled }) {
       disabled={disabled}
       title={label}
       className={cn(
-        "flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium uppercase tracking-wider transition disabled:opacity-40",
+        "flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider transition disabled:opacity-40",
         tone
       )}
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className="h-5 w-5" />
       <span className="hidden sm:inline">{label}</span>
     </button>
+  );
+}
+
+/**
+ * One reply row, X-style: cheerable and repliable just like a tiding, and
+ * recursive, so an answer to this reply nests one level further in, with its
+ * own thread line, rather than only ever answering the top-level tiding.
+ */
+function ReplyRow({ reply, byParent, myReplyCheers, onCheerReply, onReplyTo, onMessageSubject, busy }) {
+  const cheered = myReplyCheers.has(reply.id);
+  const kids = byParent.get(reply.id) || [];
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onMessageSubject?.(reply.author_subject_id)}
+          className="h-8 shrink-0"
+          title={`Send ${reply.author_handle} a raven`}
+        >
+          <Avatar url={null} handle={reply.author_handle} small />
+        </button>
+        <div className="min-w-0 flex-1">
+          <button
+            onClick={() => onMessageSubject?.(reply.author_subject_id)}
+            className="max-w-full truncate text-[13px] font-semibold hover:underline"
+          >
+            {reply.author_handle}
+          </button>
+          <p className="break-words text-sm leading-snug text-foreground/80">{reply.body}</p>
+          <div className="mt-1 flex items-center gap-5">
+            <button
+              onClick={() => onReplyTo(reply)}
+              title="Reply"
+              className="flex items-center gap-1 text-[11px] text-muted-foreground transition hover:text-sky-400"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Reply
+            </button>
+            <button
+              onClick={() => onCheerReply(reply.id)}
+              disabled={busy}
+              title="Cheer"
+              className={cn(
+                "flex items-center gap-1 text-[11px] transition",
+                cheered ? "text-primary" : "text-muted-foreground hover:text-primary"
+              )}
+            >
+              <Tankard className={cn("h-3.5 w-3.5", cheered && "fill-current")} />
+              {reply.cheers_count > 0 && <span className="tnum">{reply.cheers_count}</span>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {kids.length > 0 && (
+        <div className="mt-2 ml-2 space-y-2 border-l-2 border-border pl-3">
+          {kids.map((kid) => (
+            <ReplyRow
+              key={kid.id}
+              reply={kid}
+              byParent={byParent}
+              myReplyCheers={myReplyCheers}
+              onCheerReply={onCheerReply}
+              onReplyTo={onReplyTo}
+              onMessageSubject={onMessageSubject}
+              busy={busy}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

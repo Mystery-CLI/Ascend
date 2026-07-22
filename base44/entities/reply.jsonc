@@ -1,14 +1,20 @@
-// Reply: a voice added beneath a tiding (a comment).
+// Reply: a voice added beneath a tiding (a comment). X-style: a reply can
+// itself be cheered and replied to, so parent_reply_id lets one nest under
+// another instead of only under the tiding.
 //
-// Public, like the tavern itself. The renown a reply earns its tiding's author
-// is granted by the server when the reply is made.
+// Public, like the tavern itself. Replying earns no renown on its own; only
+// being cheered by someone else does, same as a tiding.
 {
   "name": "Reply",
   "type": "object",
   "properties": {
     "tiding_id": {
       "type": "string",
-      "description": "The tiding this reply belongs to."
+      "description": "The tiding this reply ultimately belongs to (even when nested)."
+    },
+    "parent_reply_id": {
+      "type": "string",
+      "description": "If set, this reply answers another reply rather than the tiding directly."
     },
     "author_subject_id": {
       "type": "string",
@@ -26,6 +32,12 @@
       "type": "string",
       "description": "The reply text.",
       "maxLength": 400
+    },
+    "cheers_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Running total of cheers on this reply. Server-written only.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
     }
   },
   "required": ["tiding_id", "body"],
