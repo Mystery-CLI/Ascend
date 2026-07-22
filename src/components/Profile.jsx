@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Loader2, Camera, LogOut, Mail, Feather } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { RankBadge } from "@/components/RankBadge";
+import { TidingCard } from "@/components/TidingCard";
 import { rankMeta, climbProgress } from "@/lib/ranks";
 import { notify } from "@/lib/toast";
 
@@ -14,10 +15,57 @@ import { notify } from "@/lib/toast";
  * matching the rule everywhere else: only the server-authoritative reader
  * (yourself) may see your exact score.
  */
-export function Profile({ subject, isMe, me, user, onUpdated, onLogout, onMessage, onBack }) {
+export function Profile({
+  subject,
+  isMe,
+  me,
+  user,
+  onUpdated,
+  onLogout,
+  onMessage,
+  onBack,
+  myCheers,
+  myReplyCheers,
+  myVotes,
+  onCheer,
+  onReply,
+  onVote,
+  onChampion,
+  onProclaim,
+  onBounty,
+  onCheerReply,
+  onOpenProfile,
+  busy,
+}) {
   const [editing, setEditing] = useState(false);
   const target = isMe ? me : subject;
   const progress = isMe ? climbProgress(me.rank, me.renown) : null;
+
+  // This subject's own timeline, X-style: everything they've ever posted,
+  // newest first. Fetched fresh rather than filtered from the tavern's
+  // capped feed, since an older tiding may have scrolled out of that window.
+  const [tidings, setTidings] = useState(null);
+  const [loadingTidings, setLoadingTidings] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!target?.id) return;
+    setTidings(null);
+    setLoadingTidings(true);
+    base44.entities.Tiding.filter({ author_subject_id: target.id }, "-created_date")
+      .then((rows) => {
+        if (!cancelled) setTidings(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setTidings([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTidings(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target?.id]);
 
   return (
     <div className="px-4 py-5">
@@ -109,6 +157,41 @@ export function Profile({ subject, isMe, me, user, onUpdated, onLogout, onMessag
               </button>
             </div>
           )}
+
+          {/* Their timeline, X-style: every tiding this subject has posted. */}
+          <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card/40">
+            <div className="border-b border-border px-4 py-2.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Tidings
+            </div>
+            {loadingTidings ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : !tidings || tidings.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No tidings yet.</p>
+            ) : (
+              tidings.map((t) => (
+                <TidingCard
+                  key={t.id}
+                  tiding={t}
+                  author={target}
+                  cheered={myCheers?.has(t.id)}
+                  onCheer={onCheer}
+                  onReply={onReply}
+                  myRank={me?.rank}
+                  onChampion={onChampion}
+                  onProclaim={onProclaim}
+                  onBounty={onBounty}
+                  myVoteIndex={myVotes?.has(t.id) ? myVotes.get(t.id) : undefined}
+                  onVote={onVote}
+                  onOpenProfile={onOpenProfile}
+                  busy={busy}
+                  myReplyCheers={myReplyCheers}
+                  onCheerReply={onCheerReply}
+                />
+              ))
+            )}
+          </div>
         </>
       )}
     </div>

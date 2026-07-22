@@ -58,8 +58,14 @@ export default function App() {
 
   // X-style: tapping ANY handle or avatar (yours or another subject's) opens
   // their crest page, never a raven directly. The crest page itself decides
-  // whether to show "Edit profile" or the Raven button.
+  // whether to show "Edit profile" or the Raven button. Viewing a crest at
+  // all requires fealty: an onlooker who has not sworn it sees the gate
+  // instead, same as any other act that needs a subject.
   const openProfile = useCallback((subjectId) => {
+    if (!meRef.current) {
+      setGate({ reason: "Enter the realm to view a subject's crest." });
+      return;
+    }
     if (!subjectId) return;
     setProfileSubjectId(subjectId);
     setView("profile");
@@ -581,6 +587,18 @@ export default function App() {
             onLogout={logout}
             onMessage={messageSubject}
             onBack={() => setView("tavern")}
+            myCheers={myCheers}
+            myReplyCheers={myReplyCheers}
+            myVotes={myVotes}
+            onCheer={cheer}
+            onReply={reply}
+            onVote={vote}
+            onChampion={champion}
+            onProclaim={proclaim}
+            onBounty={bounty}
+            onCheerReply={cheerReply}
+            onOpenProfile={openProfile}
+            busy={busy}
           />
         </div>
       )}
@@ -606,6 +624,12 @@ export default function App() {
           icon={Feather}
           label="Rookery"
         />
+        <NavButton
+          active={view === "profile" && profileSubjectId === me?.id}
+          onClick={() => openProfile(me?.id)}
+          icon={User}
+          label="Crest"
+        />
       </nav>
 
       {/* The fealty gate, summoned by any act that needs a subject */}
@@ -623,7 +647,7 @@ export default function App() {
             <motion.div
               initial={{ scale: 0.95, y: 12 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+              exit={{ scale: 0.95 }}
               transition={{ type: "spring", stiffness: 260, damping: 22 }}
             >
               <FealtyGate
@@ -649,7 +673,7 @@ export default function App() {
             <motion.div
               initial={{ scale: 0.8, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0 }}
+              exit={{ scale: 0.8 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
               className="max-w-xs rounded-3xl border border-primary/40 bg-card p-8 text-center"
             >

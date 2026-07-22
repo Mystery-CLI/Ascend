@@ -344,7 +344,7 @@ export function TidingCard({
             <motion.div
               initial={{ scale: 0.92, y: 12 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0 }}
+              exit={{ scale: 0.92 }}
               transition={{ type: "spring", stiffness: 260, damping: 22 }}
               className="w-full max-w-xs rounded-3xl border border-border bg-card p-6 text-center"
             >
@@ -648,7 +648,7 @@ function ReplyThread({
       initial={{ opacity: 0, x: depth > 1 ? 24 : 0 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0 }}
-      transition={{ type: "spring", stiffness: 320, damping: 32 }}
+      transition={{ x: { type: "spring", stiffness: 320, damping: 32 }, opacity: { duration: 0.15 } }}
       className="fixed inset-x-0 z-50 flex flex-col bg-background"
       style={{ top: offsetTop, height }}
     >
@@ -805,7 +805,7 @@ function TidingThread({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ type: "spring", stiffness: 320, damping: 32 }}
+      transition={{ duration: 0.15 }}
       className="fixed inset-x-0 z-50 flex flex-col bg-background"
       style={{ top: offsetTop, height }}
     >
@@ -943,7 +943,7 @@ function QuickCompose({ tiding, tidingAuthor, onClose, onSubmit }) {
       <motion.div
         initial={{ y: 40, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 20, opacity: 0 }}
+        exit={{ y: 20 }}
         transition={{ type: "spring", stiffness: 320, damping: 30 }}
         className="w-full max-w-md rounded-t-3xl border border-border bg-card p-4 sm:rounded-3xl sm:p-5"
         style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
