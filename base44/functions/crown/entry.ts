@@ -57,11 +57,18 @@ Deno.serve(async (req) => {
     const reignExpired = !!crown?.reign_ends_at && Date.now() >= new Date(crown.reign_ends_at).getTime();
     const needCrown = !crown || !crown.monarch_id || monarchIsAi || reignExpired;
     if (needCrown) {
-      const leader = ranked.find((s) => effectiveWeekRenown(s) > 0) || ranked[0];
+      // Only someone who has actually earned renown THIS WEEK may take the
+      // throne. No fallback to all-time renown: a quiet week means no one has
+      // proven themselves, and the crown sits empty rather than defaulting to
+      // whoever happens to be on top from weeks ago.
+      const leader = ranked.find((s) => effectiveWeekRenown(s) > 0) || null;
 
-      // Demote the previous monarch to the rank their renown earns.
+      // Demote the previous monarch to the rank their renown earns. Searched in
+      // allSubjects, not the AI-filtered `subjects`, so this still works when the
+      // outgoing monarch was an AI citizen slipping past an earlier version of
+      // this rule.
       if (crown?.monarch_id && crown.monarch_id !== leader?.id) {
-        const old = subjects.find((s) => s.id === crown.monarch_id);
+        const old = allSubjects.find((s) => s.id === crown.monarch_id);
         if (old && old.rank === "monarch") {
           await svc.entities.Subject.update(old.id, { rank: rankForRenown(old.renown || 0) });
         }
@@ -82,6 +89,12 @@ Deno.serve(async (req) => {
           ? { ...crown, ...(await svc.entities.Crown.update(crown.id, fields)) }
           : await svc.entities.Crown.create(fields);
         // update() may return only the patch; keep our merged view consistent
+        crown = { ...crown, ...fields };
+      } else if (crown?.monarch_id) {
+        // No one qualifies right now: vacate the throne rather than leave a
+        // dethroned or AI monarch's id sitting on the Crown record.
+        const fields = { monarch_id: null, monarch_handle: null, week_key: wk };
+        await svc.entities.Crown.update(crown.id, fields);
         crown = { ...crown, ...fields };
       }
     }

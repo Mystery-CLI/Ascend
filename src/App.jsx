@@ -528,7 +528,7 @@ export default function App() {
 
       {view === "throne" && (
         <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
-          <ThroneRoom me={me} onStanding={applyStanding} />
+          <ThroneRoom me={me} onStanding={applyStanding} onGoToTavern={() => setView("tavern")} />
         </div>
       )}
 

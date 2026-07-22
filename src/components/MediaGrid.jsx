@@ -1,12 +1,18 @@
 import { cn } from "@/lib/utils";
+import { AudioPlayer } from "@/components/AudioPlayer";
 
 /**
  * X-style media display: one image fills, two sit side by side, three make a
  * big-plus-two, four form a 2x2. A single short video plays inline with
- * controls. Everything is clipped to one rounded frame with a subtle border.
+ * controls, a single audio clip gets its own bespoke player. Everything is
+ * clipped to one rounded frame with a subtle border.
  */
 export function MediaGrid({ media = [], kind, poster }) {
   if (!media || media.length === 0) return null;
+
+  if (kind === "audio") {
+    return <AudioPlayer src={media[0]} />;
+  }
 
   if (kind === "video") {
     // With a real poster, use it. Without one (older posts), append a media

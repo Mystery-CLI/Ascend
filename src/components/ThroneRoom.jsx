@@ -26,7 +26,7 @@ const DECREE_OPTIONS = [
   { id: "vote", label: "Vote in a poll today." },
 ];
 
-export function ThroneRoom({ me, onStanding }) {
+export function ThroneRoom({ me, onStanding, onGoToTavern }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [decreeChoice, setDecreeChoice] = useState(DECREE_OPTIONS[0].id);
@@ -57,8 +57,18 @@ export function ThroneRoom({ me, onStanding }) {
       const res = await realm("heed");
       setHeeded(true);
       onStanding?.(res);
+      notify(`Decree heeded. +${res.bonus} renown.`, "success");
     } catch (err) {
-      notify(err.message);
+      // "Not yet done" is not a failure, it is a pointer to where the task
+      // lives. Send them there instead of just naming the problem, and they
+      // come back here to claim the renown once the server can see it is done.
+      const notDone = /not yet done/i.test(err.message);
+      if (notDone && decree) {
+        notify(`Go to the Tavern: ${decree.text}`, "info");
+        onGoToTavern?.();
+      } else {
+        notify(err.message);
+      }
     } finally {
       setBusy(false);
     }

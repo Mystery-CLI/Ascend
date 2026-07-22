@@ -8,6 +8,12 @@
 //   open    - both may now speak freely, unlocked the moment the non-initiator
 //             sent their first message.
 //
+// blocked_by holds the subject id of whoever blocked this thread (either side,
+// any rank relationship). While set, NEITHER party may send. hidden_by holds
+// whoever has removed this thread from their own inbox; it is per-viewer, the
+// other person's copy is untouched, and a new message clears it so a hidden
+// thread reappears the moment there is something new in it.
+//
 // Only the server writes these; clients read only the conversations they are in.
 {
   "name": "Conversation",
@@ -23,7 +29,17 @@
     "initiator_id": { "type": "string" },
     "last_message_at": { "type": "string", "format": "date-time" },
     "last_preview": { "type": "string" },
-    "last_sender_id": { "type": "string" }
+    "last_sender_id": { "type": "string" },
+    "blocked_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Subject id(s) who have blocked this thread. Non-empty means neither side may send."
+    },
+    "hidden_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Subject id(s) who removed this thread from their own inbox. Per-viewer; cleared by a new message."
+    }
   },
   "required": ["a_id", "b_id"],
   "rls": {

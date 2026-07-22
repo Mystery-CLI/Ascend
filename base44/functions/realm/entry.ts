@@ -119,7 +119,12 @@ Deno.serve(async (req) => {
       const media = Array.isArray(payload.media)
         ? payload.media.filter((u: unknown) => typeof u === "string").slice(0, 4)
         : [];
-      const media_kind = payload.media_kind === "video" ? "video" : media.length ? "image" : undefined;
+      const media_kind =
+        payload.media_kind === "video" || payload.media_kind === "audio"
+          ? payload.media_kind
+          : media.length
+            ? "image"
+            : undefined;
 
       // A poll: 2 to 4 non-empty options. A poll tiding carries no media.
       const pollOptions = Array.isArray(payload.poll_options)

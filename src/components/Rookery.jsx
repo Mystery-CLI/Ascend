@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ArrowLeft, Loader2, Send, Feather, Crown } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { ArrowLeft, Loader2, Send, Feather, Crown, MoreVertical, Ban, Trash2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { RankBadge } from "@/components/RankBadge";
 import { rankMeta } from "@/lib/ranks";
+import { notify } from "@/lib/toast";
 import { cn, timeAgo } from "@/lib/utils";
+import { useVisualViewport } from "@/lib/useVisualViewport";
 
 /**
  * The Rookery: rank-gated ravens between subjects.
@@ -22,8 +25,11 @@ export function Rookery({ me, subjects, startWith, onConsumedStart }) {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const activeRef = useRef(null);
   activeRef.current = active;
+  const { height, offsetTop } = useVisualViewport();
 
   const loadConversations = useCallback(async () => {
     const rows = await base44.entities.Conversation.list("-last_message_at", 100).catch(() => []);
@@ -129,25 +135,112 @@ export function Rookery({ me, subjects, startWith, onConsumedStart }) {
     }
   };
 
+  const isBlockedByMe = active && !active.newWith && (active.blocked_by || []).includes(me.id);
+  const isBlocked = active && !active.newWith && (active.blocked_by || []).length > 0;
+
+  const toggleBlock = async () => {
+    if (!active || active.newWith) return;
+    setActionBusy(true);
+    setMenuOpen(false);
+    try {
+      const res = await base44.functions.invoke("rookery", {
+        action: isBlockedByMe ? "unblock" : "block",
+        conversation_id: active.id,
+      });
+      const nowBlocked = res?.data?.blocked;
+      setActive((prev) => ({
+        ...prev,
+        blocked_by: nowBlocked
+          ? [...(prev.blocked_by || []), me.id]
+          : (prev.blocked_by || []).filter((id) => id !== me.id),
+      }));
+      notify(nowBlocked ? "Blocked. Neither of you can send until you unblock." : "Unblocked.", "success");
+      await loadConversations();
+    } catch (err) {
+      notify(err?.response?.data?.error || "Could not update the block.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const deleteConversation = async (conv) => {
+    setActionBusy(true);
+    try {
+      await base44.functions.invoke("rookery", { action: "hide", conversation_id: conv.id });
+      setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+      if (activeRef.current?.id === conv.id) setActive(null);
+      notify("Removed from your Rookery.", "success");
+    } catch (err) {
+      notify(err?.response?.data?.error || "Could not remove that conversation.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   /* -- thread view ------------------------------------------------------- */
   if (active) {
     const o = other(active);
     const rel = relationOf(active);
-    const canSend = rel.kind !== "audience-sent";
+    const canSend = rel.kind !== "audience-sent" && !isBlocked;
+    const canManage = !active.newWith; // block/delete need a real, saved conversation
 
     // A full-screen chat that fits any viewport: header, scrolling messages,
     // and an input pinned to the bottom above the phone's home indicator.
     // Fixed to the viewport so mobile browser chrome cannot push the input off.
     return (
-      <div className="fixed inset-0 z-40 mx-auto flex max-w-[600px] flex-col bg-background">
+      <div
+        className="fixed inset-x-0 z-40 mx-auto flex max-w-[600px] flex-col bg-background"
+        style={{ top: offsetTop, height }}
+      >
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
           <button onClick={() => setActive(null)} className="text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2">
             <span className="font-semibold">{o.handle}</span>
             <RankBadge rank={o.rank} size="xs" />
           </div>
+          {canManage && (
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                className="rounded-full p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              >
+                <MoreVertical className="h-5 w-5" />
+              </button>
+              <AnimatePresence>
+                {menuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute right-0 top-10 z-20 w-52 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+                    >
+                      <button
+                        onClick={toggleBlock}
+                        disabled={actionBusy}
+                        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm transition hover:bg-secondary disabled:opacity-50"
+                      >
+                        <Ban className="h-4 w-4 text-destructive" />
+                        {isBlockedByMe ? "Unblock" : "Block"}
+                      </button>
+                      <button
+                        onClick={() => deleteConversation(active)}
+                        disabled={actionBusy}
+                        className="flex w-full items-center gap-2.5 border-t border-border px-3.5 py-2.5 text-left text-sm transition hover:bg-secondary disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                        Delete conversation
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </header>
 
         <div className="flex-1 space-y-2 overflow-y-auto px-4 py-4">
@@ -221,10 +314,29 @@ export function Rookery({ me, subjects, startWith, onConsumedStart }) {
           </form>
         ) : (
           <div
-            className="shrink-0 border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
+            className="flex shrink-0 flex-col items-center gap-2 border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
             style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
           >
-            Awaiting their reply. You cannot send again until they answer.
+            {isBlocked ? (
+              <>
+                <span>
+                  {isBlockedByMe
+                    ? "You have blocked this conversation."
+                    : "This conversation is blocked."}
+                </span>
+                {isBlockedByMe && (
+                  <button
+                    onClick={toggleBlock}
+                    disabled={actionBusy}
+                    className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                  >
+                    Unblock
+                  </button>
+                )}
+              </>
+            ) : (
+              "Awaiting their reply. You cannot send again until they answer."
+            )}
           </div>
         )}
       </div>
@@ -242,44 +354,60 @@ export function Rookery({ me, subjects, startWith, onConsumedStart }) {
         <div className="flex justify-center py-16">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
         </div>
-      ) : conversations.length === 0 ? (
+      ) : conversations.filter((c) => !(c.hidden_by || []).includes(me.id)).length === 0 ? (
         <div className="px-6 py-16 text-center text-sm text-muted-foreground">
           No ravens yet. Tap a subject in the tavern to send one, mindful of rank.
         </div>
       ) : (
-        conversations.map((c) => {
-          const o = other(c);
-          const pendingIn = c.status === "pending" && c.initiator_id !== me.id;
-          return (
-            <button
-              key={c.id}
-              onClick={() => setActive(c)}
-              className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition hover:bg-foreground/[0.02]"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary font-display font-semibold text-primary">
-                {(o.handle || "?").charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold">{o.handle}</span>
-                  <RankBadge rank={o.rank} size="xs" />
-                  {pendingIn && (
-                    <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-primary">
-                      new
-                    </span>
+        conversations
+          .filter((c) => !(c.hidden_by || []).includes(me.id)) // deleted-for-me stays hidden until new activity
+          .map((c) => {
+            const o = other(c);
+            const pendingIn = c.status === "pending" && c.initiator_id !== me.id;
+            const blocked = (c.blocked_by || []).length > 0;
+            return (
+              <div
+                key={c.id}
+                className="group flex items-center gap-1 border-b border-border transition hover:bg-foreground/[0.02]"
+              >
+                <button
+                  onClick={() => setActive(c)}
+                  className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary font-display font-semibold text-primary">
+                    {(o.handle || "?").charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-semibold">{o.handle}</span>
+                      <RankBadge rank={o.rank} size="xs" />
+                      {blocked && <Ban className="h-3 w-3 shrink-0 text-destructive" />}
+                      {pendingIn && !blocked && (
+                        <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-primary">
+                          new
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {c.status === "pending" && c.initiator_id === me.id ? "Awaiting reply · " : ""}
+                      {c.last_preview || "…"}
+                    </p>
+                  </div>
+                  {c.last_message_at && (
+                    <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(c.last_message_at)}</span>
                   )}
-                </div>
-                <p className="truncate text-sm text-muted-foreground">
-                  {c.status === "pending" && c.initiator_id === me.id ? "Awaiting reply · " : ""}
-                  {c.last_preview || "…"}
-                </p>
+                </button>
+                <button
+                  onClick={() => deleteConversation(c)}
+                  disabled={actionBusy}
+                  title="Delete conversation"
+                  className="mr-2 shrink-0 rounded-full p-2 text-muted-foreground/50 transition hover:bg-secondary hover:text-destructive active:text-destructive disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
-              {c.last_message_at && (
-                <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(c.last_message_at)}</span>
-              )}
-            </button>
-          );
-        })
+            );
+          })
       )}
     </div>
   );

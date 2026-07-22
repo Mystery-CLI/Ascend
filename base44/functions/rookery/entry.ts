@@ -73,15 +73,41 @@ Deno.serve(async (req) => {
     return json({ error: "Malformed petition." }, 400);
   }
 
-  if (payload.action !== "send") return json({ error: "Unknown rookery action." }, 400);
-
-  const body = (payload.body || "").toString().trim();
-  if (!body) return json({ error: "A raven carries no empty scroll." }, 400);
-  if (body.length > 1000) return json({ error: "That message is too long." }, 400);
+  const action = payload.action;
+  if (!["send", "block", "unblock", "hide"].includes(action)) {
+    return json({ error: "Unknown rookery action." }, 400);
+  }
 
   try {
     const me = await findSubjectByEmail(svc, user.email);
     if (!me) return json({ error: "Enter the realm first." }, 400);
+
+    // -- block / unblock / hide: all act on an existing conversation the
+    //    caller is provably part of, checked once here for all three. --------
+    if (action === "block" || action === "unblock" || action === "hide") {
+      const conv = await svc.entities.Conversation.get(payload.conversation_id);
+      if (!conv || (conv.a_id !== me.id && conv.b_id !== me.id)) {
+        return json({ error: "No such conversation." }, 404);
+      }
+
+      if (action === "hide") {
+        const hidden = new Set(conv.hidden_by || []);
+        hidden.add(me.id);
+        await svc.entities.Conversation.update(conv.id, { hidden_by: [...hidden] });
+        return json({ ok: true, hidden: true });
+      }
+
+      const blocked = new Set(conv.blocked_by || []);
+      if (action === "block") blocked.add(me.id);
+      else blocked.delete(me.id);
+      await svc.entities.Conversation.update(conv.id, { blocked_by: [...blocked] });
+      return json({ ok: true, blocked: action === "block" });
+    }
+
+    // -- send ------------------------------------------------------------
+    const body = (payload.body || "").toString().trim();
+    if (!body) return json({ error: "A raven carries no empty scroll." }, 400);
+    if (body.length > 1000) return json({ error: "That message is too long." }, 400);
 
     const target = await svc.entities.Subject.get(payload.target_subject_id);
     if (!target) return json({ error: "No such subject." }, 404);
@@ -91,6 +117,12 @@ Deno.serve(async (req) => {
     const [a, b] = me.id < target.id ? [me, target] : [target, me];
     const found = await svc.entities.Conversation.filter({ a_id: a.id, b_id: b.id });
     let conv = found[0] || null;
+
+    // Blocking is universal: it works regardless of how the two ranks relate,
+    // and once set, NEITHER side may send until whoever blocked it lifts it.
+    if (conv?.blocked_by?.length > 0) {
+      return json({ error: "This conversation is blocked." }, 403);
+    }
 
     const rel = rankOrder(me.rank) - rankOrder(target.rank); // >0 higher, <0 lower, 0 equal
     const iAmMonarch = me.rank === "monarch";
@@ -108,6 +140,10 @@ Deno.serve(async (req) => {
         last_message_at: new Date().toISOString(),
         last_preview: preview(body),
         last_sender_id: me.id,
+        // A new message un-hides the thread for anyone who had removed it from
+        // their inbox: deleting is per-viewer housekeeping, not a promise that
+        // new activity stays invisible to them.
+        hidden_by: [],
       });
     };
 

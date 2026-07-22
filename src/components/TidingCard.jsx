@@ -1,12 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { MessageCircle, Loader2, Megaphone, Star, Coins, X } from "lucide-react";
+import { MessageCircle, Loader2, Megaphone, Star, Coins, ArrowLeft, ChevronRight } from "lucide-react";
 import { RankBadge } from "@/components/RankBadge";
 import { MediaGrid } from "@/components/MediaGrid";
 import { Poll } from "@/components/Poll";
 import { base44 } from "@/api/base44Client";
 import { rankMeta } from "@/lib/ranks";
 import { cn, timeAgo } from "@/lib/utils";
+import { notify } from "@/lib/toast";
+import { useVisualViewport } from "@/lib/useVisualViewport";
 
 const EMPTY_SET = new Set();
 
@@ -68,15 +70,18 @@ export function TidingCard({
   myReplyCheers = EMPTY_SET,
   onCheerReply,
 }) {
-  const [open, setOpen] = useState(false);
+  // X-style navigation: tapping the tiding's body opens its own full page (the
+  // tiding plus its top-level replies); tapping into a reply from there pushes
+  // a focused id onto replyStack (deeper taps push further, back pops). The
+  // comment ICON never shows this at all, it only opens a bare compose box, per
+  // the "icon composes, body views" split X actually uses.
+  const [viewingTiding, setViewingTiding] = useState(false);
+  const [replyStack, setReplyStack] = useState([]);
+  const [quickCompose, setQuickCompose] = useState(false);
   const [replies, setReplies] = useState(null);
   const [loadingReplies, setLoadingReplies] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [powerBusy, setPowerBusy] = useState(false);
   const [confirming, setConfirming] = useState(null); // "champion" | "proclaim" | null
-  const [replyingTo, setReplyingTo] = useState(null); // { id, handle } | null, for nested replies
-  const composerRef = useRef(null);
 
   // Group the flat reply list into a tree, X-style: a reply can itself be
   // replied to, so this is keyed by parent_reply_id (null for a reply that
@@ -112,44 +117,48 @@ export function TidingCard({
     }
   };
 
-  const toggleReplies = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && replies === null) {
-      setLoadingReplies(true);
-      try {
-        const rows = await base44.entities.Reply.filter({ tiding_id: tiding.id }, "created_date");
-        setReplies(rows);
-      } catch {
-        setReplies([]);
-      } finally {
-        setLoadingReplies(false);
-      }
-    }
-  };
-
-  const submitReply = async (e) => {
-    e.preventDefault();
-    const body = draft.trim();
-    if (!body) return;
-    setSending(true);
+  const ensureRepliesLoaded = async () => {
+    if (replies !== null) return;
+    setLoadingReplies(true);
     try {
-      const newReply = await onReply(tiding.id, body, replyingTo?.id);
-      setDraft("");
-      setReplyingTo(null);
-      if (newReply) setReplies((prev) => [...(prev || []), newReply]);
-      if (!open) setOpen(true);
+      const rows = await base44.entities.Reply.filter({ tiding_id: tiding.id }, "created_date");
+      setReplies(rows);
     } catch {
-      /* gate opened or realm refused; keep the draft */
+      setReplies([]);
     } finally {
-      setSending(false);
+      setLoadingReplies(false);
     }
   };
 
-  const startReplyTo = (r) => {
-    setReplyingTo({ id: r.id, handle: r.author_handle });
-    if (!open) setOpen(true);
-    requestAnimationFrame(() => composerRef.current?.focus());
+  // Tapping the body: the tiding's own page, full content plus its top-level
+  // replies. The only place existing comments are ever shown.
+  const openTidingView = async () => {
+    await ensureRepliesLoaded();
+    setReplyStack([]);
+    setViewingTiding(true);
+  };
+
+  const pushReply = (replyId) => setReplyStack((prev) => [...prev, replyId]);
+  const backOneLevel = () =>
+    setReplyStack((prev) => {
+      if (prev.length > 0) return prev.slice(0, -1);
+      setViewingTiding(false); // already at the tiding's own page: back closes it
+      return prev;
+    });
+  const focusReplyId = replyStack[replyStack.length - 1] || null;
+
+  const submitTidingReply = async (body) => {
+    const newReply = await onReply(tiding.id, body, null);
+    if (newReply) setReplies((prev) => [...(prev || []), newReply]);
+  };
+
+  // Tapping the comment ICON: compose only, never a view of what is already
+  // there. Closes itself on send, same as X dismisses a quick reply from feed.
+  const submitQuickCompose = async (body) => {
+    const newReply = await onReply(tiding.id, body, null);
+    if (newReply) setReplies((prev) => (prev === null ? prev : [...prev, newReply]));
+    setQuickCompose(false);
+    notify("Reply sent.", "success");
   };
 
   // Cheering a reply: the "have I cheered" Set lives in App (so it can be
@@ -211,11 +220,17 @@ export function TidingCard({
           <Avatar url={author?.avatar_url} handle={handle} />
         </button>
 
-        <div className="min-w-0 flex-1">
+        <div
+          onClick={openTidingView}
+          className="min-w-0 flex-1 cursor-pointer"
+        >
           {/* Inline header, X-style: name, rank, dot, time */}
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <button
-              onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMessageSubject?.(tiding.author_subject_id);
+              }}
               className="max-w-full truncate text-[15px] font-semibold leading-tight hover:underline"
             >
               {handle}
@@ -234,18 +249,22 @@ export function TidingCard({
           <MediaGrid media={tiding.media} kind={tiding.media_kind} poster={tiding.media_poster} />
 
           {tiding.poll_options?.length >= 2 && (
-            <Poll tiding={tiding} myVoteIndex={myVoteIndex} onVote={onVote} disabled={busy} />
+            <div onClick={(e) => e.stopPropagation()}>
+              <Poll tiding={tiding} myVoteIndex={myVoteIndex} onVote={onVote} disabled={busy} />
+            </div>
           )}
 
-          {/* Engagement bar: actions grouped left, powers to the right */}
-          <div className="mt-2 flex items-center">
+          {/* Engagement bar: actions grouped left, powers to the right. Its own
+              click zone, so cheering/replying/powers never also opens the
+              tiding's page underneath them. */}
+          <div onClick={(e) => e.stopPropagation()} className="mt-2 flex items-center">
             <div className="flex items-center gap-8">
               <Action
                 icon={MessageCircle}
                 count={tiding.replies_count || 0}
-                onClick={toggleReplies}
+                onClick={() => setQuickCompose(true)}
                 hoverColor="group-hover:bg-sky-500/10 group-hover:text-sky-400"
-                active={open}
+                active={quickCompose}
                 activeColor="text-sky-400"
                 label="Reply"
               />
@@ -294,136 +313,144 @@ export function TidingCard({
             </div>
           </div>
 
-          {/* A plain-language confirm before wielding Champion, Proclaim, or
-              Bounty: all three act on someone beyond just you and are
-              once-a-day, so a tap should not fire them by accident. */}
-          <AnimatePresence>
-            {confirming && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) setConfirming(null);
-                }}
-              >
-                <motion.div
-                  initial={{ scale: 0.92, y: 12 }}
-                  animate={{ scale: 1, y: 0 }}
-                  exit={{ scale: 0.92, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 260, damping: 22 }}
-                  className="w-full max-w-xs rounded-3xl border border-border bg-card p-6 text-center"
-                >
-                  {(() => {
-                    const info = POWER_INFO[confirming];
-                    const Icon = info.icon;
-                    return (
-                      <>
-                        <Icon className={cn("mx-auto mb-3 h-8 w-8", info.tone)} />
-                        <p className="font-display text-lg font-bold text-foreground">{info.title}</p>
-                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{info.body(handle)}</p>
-                        <div className="mt-5 flex gap-2">
-                          <button
-                            onClick={() => setConfirming(null)}
-                            className="h-10 flex-1 rounded-xl bg-secondary text-sm font-medium text-foreground transition hover:brightness-110"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => {
-                              const which = confirming;
-                              setConfirming(null);
-                              wield(() => {
-                                if (which === "champion") return onChampion(tiding.id);
-                                if (which === "proclaim") return onProclaim(tiding.id);
-                                return onBounty(author.id);
-                              });
-                            }}
-                            className={cn(
-                              "h-10 flex-1 rounded-xl text-sm font-semibold text-primary-foreground transition hover:brightness-110",
-                              info.confirmBg
-                            )}
-                          >
-                            {info.confirmLabel}
-                          </button>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Replies */}
-          <AnimatePresence initial={false}>
-            {open && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                {/* Replies nest INSIDE the tiding, X-style: indented past the
-                    author's avatar with a thread line, so they read as answers
-                    to this post rather than posts of their own. */}
-                <div className="mt-2 ml-2 space-y-3 border-l-2 border-border pl-4 pt-1">
-                  {loadingReplies ? (
-                    <div className="flex justify-center py-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : (
-                    rootReplies.map((r) => (
-                      <ReplyRow
-                        key={r.id}
-                        reply={r}
-                        byParent={byParent}
-                        myReplyCheers={myReplyCheers}
-                        onCheerReply={cheerReply}
-                        onReplyTo={startReplyTo}
-                        onMessageSubject={onMessageSubject}
-                        busy={busy}
-                      />
-                    ))
-                  )}
-
-                  <form onSubmit={submitReply} className="space-y-1.5 pt-0.5">
-                    {replyingTo && (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        Replying to <span className="font-medium text-foreground/80">@{replyingTo.handle}</span>
-                        <button
-                          type="button"
-                          onClick={() => setReplyingTo(null)}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={composerRef}
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        placeholder={replyingTo ? `Reply to @${replyingTo.handle}...` : "Reply to this tiding..."}
-                        className="h-9 min-w-0 flex-1 rounded-full border border-border bg-background/40 px-3.5 text-sm focus:border-primary/60 focus:outline-none"
-                      />
-                      <button
-                        type="submit"
-                        disabled={sending || !draft.trim()}
-                        className="flex h-9 shrink-0 items-center rounded-full bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
-                      >
-                        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </div>
+
+      {/* Everything below is rendered OUTSIDE the clickable content column on
+          purpose: each of these is a full-screen overlay, and if it were a
+          descendant of that column, taps inside it (typing a reply, tapping a
+          menu) would bubble up and re-trigger openTidingView underneath it.
+          Sibling position means that can never happen, no stopPropagation
+          bookkeeping required. */}
+
+      {/* A plain-language confirm before wielding Champion, Proclaim, or
+          Bounty: all three act on someone beyond just you and are
+          once-a-day, so a tap should not fire them by accident. */}
+      <AnimatePresence>
+        {confirming && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setConfirming(null);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 22 }}
+              className="w-full max-w-xs rounded-3xl border border-border bg-card p-6 text-center"
+            >
+              {(() => {
+                const info = POWER_INFO[confirming];
+                const Icon = info.icon;
+                return (
+                  <>
+                    <Icon className={cn("mx-auto mb-3 h-8 w-8", info.tone)} />
+                    <p className="font-display text-lg font-bold text-foreground">{info.title}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{info.body(handle)}</p>
+                    <div className="mt-5 flex gap-2">
+                      <button
+                        onClick={() => setConfirming(null)}
+                        className="h-10 flex-1 rounded-xl bg-secondary text-sm font-medium text-foreground transition hover:brightness-110"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          const which = confirming;
+                          setConfirming(null);
+                          wield(() => {
+                            if (which === "champion") return onChampion(tiding.id);
+                            if (which === "proclaim") return onProclaim(tiding.id);
+                            return onBounty(author.id);
+                          });
+                        }}
+                        className={cn(
+                          "h-10 flex-1 rounded-xl text-sm font-semibold text-primary-foreground transition hover:brightness-110",
+                          info.confirmBg
+                        )}
+                      >
+                        {info.confirmLabel}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* The tiding's own page: its full content plus its top-level replies.
+          The ONLY place any existing comments are ever shown. Opened by
+          tapping anywhere in the clickable column above, body text or not:
+          a media-only or poll-only tiding has no body paragraph to tap, so
+          the click lives on the whole column as a fallback that always works. */}
+      <AnimatePresence>
+        {viewingTiding && !focusReplyId && (
+          <TidingThread
+            tiding={tiding}
+            author={author}
+            handle={handle}
+            rank={rank}
+            cheered={cheered}
+            onCheer={onCheer}
+            rootReplies={rootReplies}
+            byParent={byParent}
+            loadingReplies={loadingReplies}
+            myReplyCheers={myReplyCheers}
+            onCheerReply={cheerReply}
+            onOpenThread={pushReply}
+            onBack={backOneLevel}
+            onMessageSubject={onMessageSubject}
+            onSubmitReply={submitTidingReply}
+            busy={busy}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* The focused thread: X-style, a reply's own replies are hidden
+          until you tap in. Reuses the same `replies`/`byParent` already
+          fetched for this tiding, so nothing new is queried to open it. */}
+      <AnimatePresence>
+        {focusReplyId && (
+          <ReplyThread
+            tiding={tiding}
+            tidingAuthor={{ handle, rank, avatar_url: author?.avatar_url }}
+            focusId={focusReplyId}
+            depth={replyStack.length}
+            replies={replies || []}
+            byParent={byParent}
+            myReplyCheers={myReplyCheers}
+            onCheerReply={cheerReply}
+            onOpenThread={pushReply}
+            onBack={backOneLevel}
+            onMessageSubject={onMessageSubject}
+            onSubmitReply={async (body) => {
+              const newReply = await onReply(tiding.id, body, focusReplyId);
+              if (newReply) setReplies((prev) => [...(prev || []), newReply]);
+            }}
+            busy={busy}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* The comment icon: compose only, never a view. Tiding shown
+          compact for context, one field, one button, nothing else. */}
+      <AnimatePresence>
+        {quickCompose && (
+          <QuickCompose
+            tiding={tiding}
+            tidingAuthor={{ handle, rank, avatar_url: author?.avatar_url }}
+            onClose={() => setQuickCompose(false)}
+            onSubmit={submitQuickCompose}
+          />
+        )}
+      </AnimatePresence>
     </motion.article>
   );
 }
@@ -500,74 +527,458 @@ function PowerButton({ icon: Icon, label, tone, onClick, disabled }) {
 }
 
 /**
- * One reply row, X-style: cheerable and repliable just like a tiding, and
- * recursive, so an answer to this reply nests one level further in, with its
- * own thread line, rather than only ever answering the top-level tiding.
+ * One reply row, X-style: cheerable, and its OWN replies stay hidden until
+ * someone taps in. Tapping the body, the "Reply" quick action, or the "N
+ * replies" line all do the same thing: open the focused thread for this
+ * reply, where its children and a composer targeting it both live.
  */
-function ReplyRow({ reply, byParent, myReplyCheers, onCheerReply, onReplyTo, onMessageSubject, busy }) {
+function ReplyRow({ reply, childCount = 0, myReplyCheers, onCheerReply, onOpenThread, onMessageSubject, busy }) {
   const cheered = myReplyCheers.has(reply.id);
-  const kids = byParent.get(reply.id) || [];
 
   return (
-    <div>
-      <div className="flex gap-2">
+    <div className="flex gap-2">
+      <button
+        onClick={() => onMessageSubject?.(reply.author_subject_id)}
+        className="h-8 shrink-0"
+        title={`Send ${reply.author_handle} a raven`}
+      >
+        <Avatar url={null} handle={reply.author_handle} small />
+      </button>
+      <div className="min-w-0 flex-1">
         <button
           onClick={() => onMessageSubject?.(reply.author_subject_id)}
-          className="h-8 shrink-0"
-          title={`Send ${reply.author_handle} a raven`}
+          className="max-w-full truncate text-[13px] font-semibold hover:underline"
         >
-          <Avatar url={null} handle={reply.author_handle} small />
+          {reply.author_handle}
         </button>
-        <div className="min-w-0 flex-1">
+        <p
+          onClick={() => onOpenThread(reply.id)}
+          className="cursor-pointer break-words text-sm leading-snug text-foreground/80"
+        >
+          {reply.body}
+        </p>
+        <div className="mt-1 flex items-center gap-5">
           <button
-            onClick={() => onMessageSubject?.(reply.author_subject_id)}
-            className="max-w-full truncate text-[13px] font-semibold hover:underline"
+            onClick={() => onOpenThread(reply.id)}
+            title="Reply"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-sky-400"
           >
-            {reply.author_handle}
+            <MessageCircle className="h-4 w-4" />
+            Reply
           </button>
-          <p className="break-words text-sm leading-snug text-foreground/80">{reply.body}</p>
-          <div className="mt-1 flex items-center gap-5">
-            <button
-              onClick={() => onReplyTo(reply)}
-              title="Reply"
-              className="flex items-center gap-1 text-[11px] text-muted-foreground transition hover:text-sky-400"
-            >
-              <MessageCircle className="h-3.5 w-3.5" />
-              Reply
-            </button>
-            <button
-              onClick={() => onCheerReply(reply.id)}
-              disabled={busy}
-              title="Cheer"
-              className={cn(
-                "flex items-center gap-1 text-[11px] transition",
-                cheered ? "text-primary" : "text-muted-foreground hover:text-primary"
-              )}
-            >
-              <Tankard className={cn("h-3.5 w-3.5", cheered && "fill-current")} />
-              {reply.cheers_count > 0 && <span className="tnum">{reply.cheers_count}</span>}
-            </button>
+          <button
+            onClick={() => onCheerReply(reply.id)}
+            disabled={busy}
+            title="Cheer"
+            className={cn(
+              "flex items-center gap-1.5 text-xs transition",
+              cheered ? "text-primary" : "text-muted-foreground hover:text-primary"
+            )}
+          >
+            <Tankard className={cn("h-4 w-4", cheered && "fill-current")} />
+            {reply.cheers_count > 0 && <span className="tnum">{reply.cheers_count}</span>}
+          </button>
+        </div>
+
+        {childCount > 0 && (
+          <button
+            onClick={() => onOpenThread(reply.id)}
+            className="mt-1.5 flex items-center gap-0.5 text-[11px] font-medium text-sky-400 hover:underline"
+          >
+            {childCount} {childCount === 1 ? "reply" : "replies"}
+            <ChevronRight className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The focused thread, X-style: opened by tapping a reply, this shows that
+ * reply as the main content with the original tiding collapsed above it for
+ * context, and only ITS direct children below, still collapsed themselves
+ * until tapped. Tapping a child pushes the stack one level deeper; back pops.
+ */
+function ReplyThread({
+  tiding,
+  tidingAuthor,
+  focusId,
+  depth,
+  replies,
+  byParent,
+  myReplyCheers,
+  onCheerReply,
+  onOpenThread,
+  onBack,
+  onMessageSubject,
+  onSubmitReply,
+  busy,
+}) {
+  const focus = replies.find((r) => r.id === focusId);
+  const children = byParent.get(focusId) || [];
+  const cheered = focus ? myReplyCheers.has(focus.id) : false;
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const { height, offsetTop } = useVisualViewport();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      await onSubmitReply(body);
+      setDraft("");
+    } catch {
+      /* gate opened or realm refused; keep the draft */
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!focus) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: depth > 1 ? 24 : 0 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ type: "spring", stiffness: 320, damping: 32 }}
+      className="fixed inset-x-0 z-50 flex flex-col bg-background"
+      style={{ top: offsetTop, height }}
+    >
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+        <button onClick={onBack} className="text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <span className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Tiding
+        </span>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {/* The tiding, collapsed for context. */}
+        <div className="flex gap-2 pb-3 opacity-60">
+          <Avatar url={tidingAuthor?.avatar_url} handle={tidingAuthor?.handle} small />
+          <div className="min-w-0 flex-1">
+            <span className="text-[13px] font-semibold">{tidingAuthor?.handle}</span>
+            <p className="line-clamp-2 break-words text-sm text-foreground/70">{tiding.body}</p>
           </div>
+        </div>
+        <div className="ml-4 h-4 w-0.5 bg-border" />
+
+        {/* The focused reply, treated like the main post here. */}
+        <div className="flex gap-2.5 border-b border-border pb-3">
+          <button
+            onClick={() => onMessageSubject?.(focus.author_subject_id)}
+            className="h-10 shrink-0"
+            title={`Send ${focus.author_handle} a raven`}
+          >
+            <Avatar url={null} handle={focus.author_handle} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <button
+              onClick={() => onMessageSubject?.(focus.author_subject_id)}
+              className="max-w-full truncate text-[15px] font-semibold hover:underline"
+            >
+              {focus.author_handle}
+            </button>
+            <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] leading-normal text-foreground/95">
+              {focus.body}
+            </p>
+            <div className="mt-2 flex items-center gap-6">
+              <button
+                onClick={() => onCheerReply(focus.id)}
+                disabled={busy}
+                className={cn(
+                  "flex items-center gap-1.5 text-[13px] transition",
+                  cheered ? "text-primary" : "text-muted-foreground hover:text-primary"
+                )}
+              >
+                <Tankard className={cn("h-[18px] w-[18px]", cheered && "fill-current")} />
+                {focus.cheers_count > 0 && <span className="tnum">{focus.cheers_count}</span>}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Its direct replies, each still collapsed until tapped further. */}
+        <div className="mt-3 space-y-3">
+          {children.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No replies yet.</p>
+          ) : (
+            <>
+              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                {children.length} {children.length === 1 ? "reply" : "replies"}
+              </p>
+              {children.map((kid) => (
+                <ReplyRow
+                  key={kid.id}
+                  reply={kid}
+                  childCount={(byParent.get(kid.id) || []).length}
+                  myReplyCheers={myReplyCheers}
+                  onCheerReply={onCheerReply}
+                  onOpenThread={onOpenThread}
+                  onMessageSubject={onMessageSubject}
+                  busy={busy}
+                />
+              ))}
+            </>
+          )}
         </div>
       </div>
 
-      {kids.length > 0 && (
-        <div className="mt-2 ml-2 space-y-2 border-l-2 border-border pl-3">
-          {kids.map((kid) => (
-            <ReplyRow
-              key={kid.id}
-              reply={kid}
-              byParent={byParent}
-              myReplyCheers={myReplyCheers}
-              onCheerReply={onCheerReply}
-              onReplyTo={onReplyTo}
-              onMessageSubject={onMessageSubject}
-              busy={busy}
-            />
-          ))}
+      <form
+        onSubmit={submit}
+        className="flex shrink-0 items-center gap-2 border-t border-border bg-background px-4 py-3"
+        style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={`Reply to @${focus.author_handle}...`}
+          className="h-10 min-w-0 flex-1 rounded-full border border-border bg-secondary/40 px-3.5 text-sm focus:border-primary/60 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={sending || !draft.trim()}
+          className="flex h-10 shrink-0 items-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40"
+        >
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
+        </button>
+      </form>
+    </motion.div>
+  );
+}
+
+/**
+ * The tiding's own page, X-style: its full content at the top (not the
+ * collapsed treatment reserved for context elsewhere), a composer for adding
+ * a new top-level reply directly beneath it, then every top-level reply below
+ * that, each still collapsed until tapped further. This is the ONLY place
+ * existing comments are ever shown, reached only by tapping the tiding's body.
+ */
+function TidingThread({
+  tiding,
+  author,
+  handle,
+  rank,
+  cheered,
+  onCheer,
+  rootReplies,
+  byParent,
+  loadingReplies,
+  myReplyCheers,
+  onCheerReply,
+  onOpenThread,
+  onBack,
+  onMessageSubject,
+  onSubmitReply,
+  busy,
+}) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const { height, offsetTop } = useVisualViewport();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      await onSubmitReply(body);
+      setDraft("");
+    } catch {
+      /* gate opened or realm refused; keep the draft */
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ type: "spring", stiffness: 320, damping: 32 }}
+      className="fixed inset-x-0 z-50 flex flex-col bg-background"
+      style={{ top: offsetTop, height }}
+    >
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+        <button onClick={onBack} className="text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <span className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Tiding
+        </span>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {/* The full tiding, uncollapsed: this page exists to show it properly. */}
+        <div className="flex gap-2.5 border-b border-border pb-3">
+          <button
+            onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+            className="h-10 shrink-0"
+            title={`Send ${handle} a raven`}
+          >
+            <Avatar url={author?.avatar_url} handle={handle} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <button
+                onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+                className="max-w-full truncate text-[15px] font-semibold hover:underline"
+              >
+                {handle}
+              </button>
+              <RankBadge rank={rank} size="xs" />
+              <span className="text-sm text-muted-foreground">·</span>
+              <span className="text-sm text-muted-foreground">{timeAgo(tiding.created_date)}</span>
+            </div>
+            {tiding.body && (
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] leading-normal text-foreground/95">
+                {tiding.body}
+              </p>
+            )}
+            <MediaGrid media={tiding.media} kind={tiding.media_kind} poster={tiding.media_poster} />
+            <div className="mt-2 flex items-center gap-6">
+              <button
+                onClick={() => onCheer(tiding.id)}
+                disabled={busy}
+                className={cn(
+                  "flex items-center gap-1.5 text-[13px] transition",
+                  cheered ? "text-primary" : "text-muted-foreground hover:text-primary"
+                )}
+              >
+                <Tankard className={cn("h-[18px] w-[18px]", cheered && "fill-current")} />
+                {tiding.cheers_count > 0 && <span className="tnum">{tiding.cheers_count}</span>}
+              </button>
+            </div>
+          </div>
         </div>
-      )}
-    </div>
+
+        {/* Add a new top-level reply, right where X puts its quick-reply box. */}
+        <form onSubmit={submit} className="flex items-center gap-2 border-b border-border py-3">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Reply to this tiding..."
+            className="h-9 min-w-0 flex-1 rounded-full border border-border bg-secondary/40 px-3.5 text-sm focus:border-primary/60 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={sending || !draft.trim()}
+            className="flex h-9 shrink-0 items-center rounded-full bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
+          >
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
+          </button>
+        </form>
+
+        {/* Every top-level reply, each still collapsed until tapped further. */}
+        <div className="mt-3 space-y-3">
+          {loadingReplies ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : rootReplies.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No replies yet.</p>
+          ) : (
+            rootReplies.map((r) => (
+              <ReplyRow
+                key={r.id}
+                reply={r}
+                childCount={(byParent.get(r.id) || []).length}
+                myReplyCheers={myReplyCheers}
+                onCheerReply={onCheerReply}
+                onOpenThread={onOpenThread}
+                onMessageSubject={onMessageSubject}
+                busy={busy}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/**
+ * Opened by the comment ICON, X-style: composing only, never a view of what
+ * is already there. The tiding shown compact for context, one field, one
+ * button. Closes itself and returns to the feed the instant a reply is sent.
+ */
+function QuickCompose({ tiding, tidingAuthor, onClose, onSubmit }) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const { height, offsetTop } = useVisualViewport();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      await onSubmit(body);
+    } catch {
+      setSending(false); // stay open with the draft intact so nothing is lost
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-x-0 z-50 flex items-end justify-center bg-background/80 backdrop-blur-sm sm:items-center sm:p-6"
+      style={{ top: offsetTop, height }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <motion.div
+        initial={{ y: 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 20, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 320, damping: 30 }}
+        className="w-full max-w-md rounded-t-3xl border border-border bg-card p-4 sm:rounded-3xl sm:p-5"
+        style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Reply
+          </span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <ChevronRight className="h-5 w-5 rotate-90" />
+          </button>
+        </div>
+
+        <div className="mb-3 flex gap-2 opacity-60">
+          <Avatar url={tidingAuthor?.avatar_url} handle={tidingAuthor?.handle} small />
+          <div className="min-w-0 flex-1">
+            <span className="text-[13px] font-semibold">{tidingAuthor?.handle}</span>
+            <p className="line-clamp-2 break-words text-sm text-foreground/70">{tiding.body}</p>
+          </div>
+        </div>
+
+        <form onSubmit={submit} className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add your voice..."
+            className="h-11 min-w-0 flex-1 rounded-full border border-border bg-background/60 px-4 text-base focus:border-primary/60 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={sending || !draft.trim()}
+            className="flex h-11 shrink-0 items-center rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+          >
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Post"}
+          </button>
+        </form>
+      </motion.div>
+    </motion.div>
   );
 }
 
