@@ -64,10 +64,14 @@
     background-attachment: fixed;
   }
 
-  /* Nothing scrolls sideways on a phone, learned the hard way. */
+  /* Nothing scrolls sideways on a phone, learned the hard way. `clip`
+     instead of `hidden`: `hidden` forces overflow-y to compute as `auto` on
+     both html and body, turning them into scroll containers, which breaks
+     position:sticky (the desktop sidebar) for anything nested inside them.
+     `clip` prevents the same horizontal overflow without that side effect. */
   html,
   body {
-    overflow-x: hidden;
+    overflow-x: clip;
     max-width: 100%;
   }
 
