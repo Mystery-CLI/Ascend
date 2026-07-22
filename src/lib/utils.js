@@ -8,6 +8,16 @@ export function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many || one + "s"}`;
 }
 
+/** Uploads (avatars, tiding media) spend from Base44's monthly integration
+ * credit pool, the same one AI calls draw from. Once it is exhausted every
+ * upload fails with a 402, which reads as a random bug unless named. */
+export function uploadErrorMessage(err) {
+  if (err?.status === 402 && err?.data?.extra_data?.reason === "integration_credits_limit_reached") {
+    return "Uploads are paused: the realm's monthly credits are used up. Try again once they renew.";
+  }
+  return err?.message || "That upload failed. Try again.";
+}
+
 /** Short relative time: "just now", "4m", "2h", "3d". */
 export function timeAgo(iso) {
   if (!iso) return "";

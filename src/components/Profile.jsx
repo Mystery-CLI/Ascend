@@ -5,6 +5,7 @@ import { RankBadge } from "@/components/RankBadge";
 import { TidingCard } from "@/components/TidingCard";
 import { rankMeta, climbProgress } from "@/lib/ranks";
 import { notify } from "@/lib/toast";
+import { uploadErrorMessage } from "@/lib/utils";
 
 /**
  * A crest page, X-style: tapping ANY handle or avatar in the realm lands here.
@@ -98,7 +99,7 @@ export function Profile({
             {/* Name and badge side by side, X-style. */}
             <div className="mt-3 flex items-center gap-2">
               <span className="font-display text-xl font-bold">{target?.handle}</span>
-              <RankBadge rank={target?.rank} size="sm" showLabel={false} />
+              <RankBadge rank={target?.rank} size="lg" showLabel={false} />
             </div>
 
             {target?.bio && (
@@ -220,8 +221,8 @@ function EditForm({ me, onDone, onUpdated }) {
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
       if (file_url) setAvatarUrl(file_url);
-    } catch {
-      notify("That upload failed. Try again.");
+    } catch (err) {
+      notify(uploadErrorMessage(err));
     } finally {
       setUploading(false);
     }

@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import { Loader2, ImagePlus, X, ListChecks, Plus } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { cn } from "@/lib/utils";
+import { cn, uploadErrorMessage } from "@/lib/utils";
 
 const DURATIONS = [
   { label: "1 hour", hours: 1 },
@@ -89,8 +89,8 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         if (file_url) setMedia((prev) => [...prev, { url: file_url, kind: "image" }]);
       }
-    } catch {
-      setError("That upload failed. Try again.");
+    } catch (err) {
+      setError(uploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -112,8 +112,8 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
       } catch {
         /* poster is a nicety; the #t fallback still shows a frame */
       }
-    } catch {
-      setError("That upload failed. Try again.");
+    } catch (err) {
+      setError(uploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
