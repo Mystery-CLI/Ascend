@@ -1,17 +1,123 @@
 import { useRef, useState } from "react";
-import { Loader2, Camera, LogOut, Mail } from "lucide-react";
+import { ArrowLeft, Loader2, Camera, LogOut, Mail, Feather } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { RankBadge } from "@/components/RankBadge";
 import { rankMeta, climbProgress } from "@/lib/ranks";
 import { notify } from "@/lib/toast";
 
 /**
- * Your own crest: the one place a subject edits their public face (portrait,
- * name, a short line) and reaches account settings (email, logout). Renown
- * and rank are shown but never editable here, same rule as everywhere else:
- * only the server moves those numbers.
+ * A crest page, X-style: tapping ANY handle or avatar in the realm lands here.
+ * Your own crest gets an "Edit profile" button that opens the same form this
+ * page used to always show; everyone else's gets a Raven button instead, so
+ * viewing and messaging share one destination the way X shares one profile
+ * route for "you" and "them". Renown is never shown here for anyone but you,
+ * matching the rule everywhere else: only the server-authoritative reader
+ * (yourself) may see your exact score.
  */
-export function Profile({ me, user, onUpdated, onLogout }) {
+export function Profile({ subject, isMe, me, user, onUpdated, onLogout, onMessage, onBack }) {
+  const [editing, setEditing] = useState(false);
+  const target = isMe ? me : subject;
+  const progress = isMe ? climbProgress(me.rank, me.renown) : null;
+
+  return (
+    <div className="px-4 py-5">
+      <div className="mb-4 flex items-center gap-3">
+        <button onClick={onBack} className="text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <h2 className="font-display text-lg font-bold text-primary">
+          {isMe ? "Your Crest" : "Crest"}
+        </h2>
+      </div>
+
+      {editing ? (
+        <EditForm me={me} onDone={() => setEditing(false)} onUpdated={onUpdated} />
+      ) : (
+        <>
+          <div className="flex flex-col items-center">
+            {target?.avatar_url ? (
+              <img
+                src={target.avatar_url}
+                alt=""
+                className="h-24 w-24 rounded-full object-cover ring-2 ring-primary/40"
+              />
+            ) : (
+              <div className="flex h-24 w-24 items-center justify-center rounded-full bg-secondary font-display text-3xl font-semibold text-primary ring-2 ring-primary/40">
+                {(target?.handle || "?").charAt(0).toUpperCase()}
+              </div>
+            )}
+
+            {/* Name and badge side by side, X-style. */}
+            <div className="mt-3 flex items-center gap-2">
+              <span className="font-display text-xl font-bold">{target?.handle}</span>
+              <RankBadge rank={target?.rank} size="sm" showLabel={false} />
+            </div>
+
+            {target?.bio && (
+              <p className="mt-1.5 max-w-xs text-center text-sm text-muted-foreground">{target.bio}</p>
+            )}
+
+            {isMe && progress && (
+              <div className="mt-3 w-full max-w-xs">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <span>{rankMeta(me.rank).label}</span>
+                  <span>
+                    {progress.into}/{progress.span} to {progress.next.label}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-secondary">
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${progress.pct}%` }} />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4">
+              {isMe ? (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="rounded-full border border-border px-4 py-2 text-sm font-semibold transition hover:bg-secondary/60"
+                >
+                  Edit profile
+                </button>
+              ) : (
+                <button
+                  onClick={() => onMessage?.(target)}
+                  className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:brightness-110"
+                >
+                  <Feather className="h-4 w-4" />
+                  Raven
+                </button>
+              )}
+            </div>
+          </div>
+
+          {isMe && (
+            <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card/40">
+              <div className="border-b border-border px-4 py-2.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                Settings
+              </div>
+              <div className="flex items-center gap-2.5 px-4 py-3 text-sm text-muted-foreground">
+                <Mail className="h-4 w-4 shrink-0" />
+                <span className="truncate">{user?.email}</span>
+              </div>
+              <button
+                onClick={onLogout}
+                className="flex w-full items-center gap-2.5 border-t border-border px-4 py-3 text-left text-sm text-destructive transition hover:bg-destructive/5"
+              >
+                <LogOut className="h-4 w-4" />
+                Leave the realm
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The editable form, unchanged from the old always-shown Profile, just now
+ * tucked behind "Edit profile" instead of being the whole page. */
+function EditForm({ me, onDone, onUpdated }) {
   const fileRef = useRef(null);
   const [handle, setHandle] = useState(me?.handle || "");
   const [bio, setBio] = useState(me?.bio || "");
@@ -51,6 +157,7 @@ export function Profile({ me, user, onUpdated, onLogout }) {
       });
       onUpdated?.({ handle: trimmedHandle, bio: trimmedBio, avatar_url: avatarUrl });
       notify("Crest updated.", "success");
+      onDone();
     } catch (err) {
       notify(err.message || "Could not save. Try again.");
     } finally {
@@ -58,12 +165,8 @@ export function Profile({ me, user, onUpdated, onLogout }) {
     }
   };
 
-  const progress = climbProgress(me.rank, me.renown);
-
   return (
-    <div className="px-4 py-5">
-      <h2 className="mb-4 text-center font-display text-2xl font-bold text-primary">Your Crest</h2>
-
+    <div>
       <div className="flex flex-col items-center">
         <button
           onClick={() => fileRef.current?.click()}
@@ -87,24 +190,6 @@ export function Profile({ me, user, onUpdated, onLogout }) {
           </div>
         </button>
         <input ref={fileRef} type="file" accept="image/*" onChange={onAvatarFile} className="hidden" />
-
-        <div className="mt-3">
-          <RankBadge rank={me.rank} size="sm" />
-        </div>
-
-        {progress && (
-          <div className="mt-3 w-full max-w-xs">
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              <span>{rankMeta(me.rank).label}</span>
-              <span>
-                {progress.into}/{progress.span} to {progress.next.label}
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-secondary">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${progress.pct}%` }} />
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="mt-6 space-y-3 rounded-2xl border border-border bg-card/50 p-4">
@@ -128,30 +213,21 @@ export function Profile({ me, user, onUpdated, onLogout }) {
           />
           <p className="mt-1 text-right text-[11px] text-muted-foreground">{bio.length}/160</p>
         </label>
-        <button
-          onClick={save}
-          disabled={saving || uploading || !dirty}
-          className="h-11 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Save changes"}
-        </button>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card/40">
-        <div className="border-b border-border px-4 py-2.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          Settings
+        <div className="flex gap-2">
+          <button
+            onClick={onDone}
+            className="h-11 flex-1 rounded-xl border border-border text-sm font-semibold transition hover:bg-secondary/60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || uploading || !dirty}
+            className="h-11 flex-1 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Save changes"}
+          </button>
         </div>
-        <div className="flex items-center gap-2.5 px-4 py-3 text-sm text-muted-foreground">
-          <Mail className="h-4 w-4 shrink-0" />
-          <span className="truncate">{user?.email}</span>
-        </div>
-        <button
-          onClick={onLogout}
-          className="flex w-full items-center gap-2.5 border-t border-border px-4 py-3 text-left text-sm text-destructive transition hover:bg-destructive/5"
-        >
-          <LogOut className="h-4 w-4" />
-          Leave the realm
-        </button>
       </div>
     </div>
   );

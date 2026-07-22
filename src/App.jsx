@@ -34,12 +34,14 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [ascension, setAscension] = useState(null); // rank-up celebration
   const [gate, setGate] = useState(null); // { reason } when the login modal is open
-  const [view, setView] = useState("tavern"); // tavern | rookery
+  const [view, setView] = useState("tavern"); // tavern | rookery | throne | profile
   const [ravenTarget, setRavenTarget] = useState(null); // subject to open a thread with
+  const [profileSubjectId, setProfileSubjectId] = useState(null); // subject whose crest is showing
   const meRef = useRef(null);
   meRef.current = me;
 
-  // Start a raven to a subject (from a tiding). Requires fealty; opens the Rookery.
+  // Start a raven to a subject (from a profile's Raven button). Requires
+  // fealty; opens the Rookery.
   const messageSubject = useCallback(
     (subject) => {
       if (!subject) return;
@@ -53,6 +55,15 @@ export default function App() {
     },
     []
   );
+
+  // X-style: tapping ANY handle or avatar (yours or another subject's) opens
+  // their crest page, never a raven directly. The crest page itself decides
+  // whether to show "Edit profile" or the Raven button.
+  const openProfile = useCallback((subjectId) => {
+    if (!subjectId) return;
+    setProfileSubjectId(subjectId);
+    setView("profile");
+  }, []);
 
   // The tavern is open to all, X-style. This gate only appears when a visitor
   // who has not sworn fealty tries to ACT. Returns true if they may proceed.
@@ -427,8 +438,8 @@ export default function App() {
             />
             {me && (
               <SidebarLink
-                active={view === "profile"}
-                onClick={() => setView("profile")}
+                active={view === "profile" && profileSubjectId === me.id}
+                onClick={() => openProfile(me.id)}
                 icon={User}
                 label="Your Crest"
               />
@@ -446,7 +457,7 @@ export default function App() {
           </div>
 
           {me ? (
-            <button onClick={() => setView("profile")} className="text-right" title="Your crest">
+            <button onClick={() => openProfile(me.id)} className="text-right" title="Your crest">
               <div className="flex items-center justify-end gap-2">
                 <span className="max-w-[9rem] truncate text-sm font-medium">{me.handle}</span>
                 <RankBadge rank={me.rank} size="xs" />
@@ -530,7 +541,7 @@ export default function App() {
                   onBounty={bounty}
                   myVoteIndex={myVotes.has(t.id) ? myVotes.get(t.id) : undefined}
                   onVote={vote}
-                  onMessageSubject={(id) => messageSubject(subjects[id])}
+                  onOpenProfile={openProfile}
                   busy={busy}
                   myReplyCheers={myReplyCheers}
                   onCheerReply={cheerReply}
@@ -559,13 +570,17 @@ export default function App() {
         </div>
       )}
 
-      {view === "profile" && me && (
+      {view === "profile" && profileSubjectId && (
         <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
           <Profile
+            subject={subjects[profileSubjectId]}
+            isMe={!!me && profileSubjectId === me.id}
             me={me}
             user={user}
             onUpdated={(patch) => setMe((prev) => ({ ...prev, ...patch }))}
             onLogout={logout}
+            onMessage={messageSubject}
+            onBack={() => setView("tavern")}
           />
         </div>
       )}

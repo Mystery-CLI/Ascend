@@ -65,7 +65,7 @@ export function TidingCard({
   onBounty,
   myVoteIndex,
   onVote,
-  onMessageSubject,
+  onOpenProfile,
   busy,
   myReplyCheers = EMPTY_SET,
   onCheerReply,
@@ -213,9 +213,9 @@ export function TidingCard({
 
       <div className="flex gap-2.5">
         <button
-          onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+          onClick={() => onOpenProfile?.(tiding.author_subject_id)}
           className="h-10 shrink-0"
-          title={`Send ${handle} a raven`}
+          title={`View ${handle}'s crest`}
         >
           <Avatar url={author?.avatar_url} handle={handle} />
         </button>
@@ -230,7 +230,7 @@ export function TidingCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onMessageSubject?.(tiding.author_subject_id);
+                  onOpenProfile?.(tiding.author_subject_id);
                 }}
                 className="max-w-full truncate text-[15px] font-semibold leading-tight hover:underline"
               >
@@ -410,7 +410,7 @@ export function TidingCard({
             onCheerReply={cheerReply}
             onOpenThread={pushReply}
             onBack={backOneLevel}
-            onMessageSubject={onMessageSubject}
+            onOpenProfile={onOpenProfile}
             onSubmitReply={submitTidingReply}
             busy={busy}
           />
@@ -433,7 +433,7 @@ export function TidingCard({
             onCheerReply={cheerReply}
             onOpenThread={pushReply}
             onBack={backOneLevel}
-            onMessageSubject={onMessageSubject}
+            onOpenProfile={onOpenProfile}
             onSubmitReply={async (body) => {
               const newReply = await onReply(tiding.id, body, focusReplyId);
               if (newReply) setReplies((prev) => [...(prev || []), newReply]);
@@ -536,21 +536,21 @@ function PowerButton({ icon: Icon, label, tone, onClick, disabled }) {
  * replies" line all do the same thing: open the focused thread for this
  * reply, where its children and a composer targeting it both live.
  */
-function ReplyRow({ reply, childCount = 0, myReplyCheers, onCheerReply, onOpenThread, onMessageSubject, busy }) {
+function ReplyRow({ reply, childCount = 0, myReplyCheers, onCheerReply, onOpenThread, onOpenProfile, busy }) {
   const cheered = myReplyCheers.has(reply.id);
 
   return (
     <div className="flex gap-2">
       <button
-        onClick={() => onMessageSubject?.(reply.author_subject_id)}
+        onClick={() => onOpenProfile?.(reply.author_subject_id)}
         className="h-8 shrink-0"
-        title={`Send ${reply.author_handle} a raven`}
+        title={`View ${reply.author_handle}'s crest`}
       >
         <Avatar url={null} handle={reply.author_handle} small />
       </button>
       <div className="min-w-0 flex-1">
         <button
-          onClick={() => onMessageSubject?.(reply.author_subject_id)}
+          onClick={() => onOpenProfile?.(reply.author_subject_id)}
           className="max-w-full truncate text-[13px] font-semibold hover:underline"
         >
           {reply.author_handle}
@@ -615,7 +615,7 @@ function ReplyThread({
   onCheerReply,
   onOpenThread,
   onBack,
-  onMessageSubject,
+  onOpenProfile,
   onSubmitReply,
   busy,
 }) {
@@ -675,15 +675,15 @@ function ReplyThread({
         {/* The focused reply, treated like the main post here. */}
         <div className="flex gap-2.5 border-b border-border pb-3">
           <button
-            onClick={() => onMessageSubject?.(focus.author_subject_id)}
+            onClick={() => onOpenProfile?.(focus.author_subject_id)}
             className="h-10 shrink-0"
-            title={`Send ${focus.author_handle} a raven`}
+            title={`View ${focus.author_handle}'s crest`}
           >
             <Avatar url={null} handle={focus.author_handle} />
           </button>
           <div className="min-w-0 flex-1">
             <button
-              onClick={() => onMessageSubject?.(focus.author_subject_id)}
+              onClick={() => onOpenProfile?.(focus.author_subject_id)}
               className="max-w-full truncate text-[15px] font-semibold hover:underline"
             >
               {focus.author_handle}
@@ -724,7 +724,7 @@ function ReplyThread({
                   myReplyCheers={myReplyCheers}
                   onCheerReply={onCheerReply}
                   onOpenThread={onOpenThread}
-                  onMessageSubject={onMessageSubject}
+                  onOpenProfile={onOpenProfile}
                   busy={busy}
                 />
               ))}
@@ -777,7 +777,7 @@ function TidingThread({
   onCheerReply,
   onOpenThread,
   onBack,
-  onMessageSubject,
+  onOpenProfile,
   onSubmitReply,
   busy,
 }) {
@@ -822,16 +822,16 @@ function TidingThread({
         {/* The full tiding, uncollapsed: this page exists to show it properly. */}
         <div className="flex gap-2.5 border-b border-border pb-3">
           <button
-            onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+            onClick={() => onOpenProfile?.(tiding.author_subject_id)}
             className="h-10 shrink-0"
-            title={`Send ${handle} a raven`}
+            title={`View ${handle}'s crest`}
           >
             <Avatar url={author?.avatar_url} handle={handle} />
           </button>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <button
-                onClick={() => onMessageSubject?.(tiding.author_subject_id)}
+                onClick={() => onOpenProfile?.(tiding.author_subject_id)}
                 className="max-w-full truncate text-[15px] font-semibold hover:underline"
               >
                 {handle}
@@ -896,7 +896,7 @@ function TidingThread({
                 myReplyCheers={myReplyCheers}
                 onCheerReply={onCheerReply}
                 onOpenThread={onOpenThread}
-                onMessageSubject={onMessageSubject}
+                onOpenProfile={onOpenProfile}
                 busy={busy}
               />
             ))
