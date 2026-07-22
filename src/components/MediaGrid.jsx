@@ -13,14 +13,19 @@ export function MediaGrid({ media = [], kind, poster }) {
     // fragment so the browser seeks to a frame instead of showing black.
     const src = poster ? media[0] : `${media[0]}#t=0.5`;
     return (
-      <div className="mt-2 overflow-hidden rounded-2xl border border-border">
+      <div className="mt-2 max-h-[520px] overflow-hidden rounded-2xl border border-border bg-black">
+        {/* A tall (portrait) video's own aspect ratio can otherwise force this
+            box taller than intended: width is a hard 100%, so without
+            object-contain the browser has no correct way to shrink a
+            9:16 clip down to fit max-h, and it ends up rendering (and
+            pushing the layout) far past its frame instead of letterboxing. */}
         <video
           src={src}
           poster={poster || undefined}
           controls
           playsInline
           preload="metadata"
-          className="max-h-[520px] w-full bg-black"
+          className="block max-h-[520px] w-full object-contain"
         />
       </div>
     );

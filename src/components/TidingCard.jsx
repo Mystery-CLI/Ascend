@@ -220,33 +220,37 @@ export function TidingCard({
           <Avatar url={author?.avatar_url} handle={handle} />
         </button>
 
-        <div
-          onClick={openTidingView}
-          className="min-w-0 flex-1 cursor-pointer"
-        >
-          {/* Inline header, X-style: name, rank, dot, time */}
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onMessageSubject?.(tiding.author_subject_id);
-              }}
-              className="max-w-full truncate text-[15px] font-semibold leading-tight hover:underline"
-            >
-              {handle}
-            </button>
-            <RankBadge rank={rank} size="xs" />
-            <span className="text-sm text-muted-foreground">·</span>
-            <span className="text-sm text-muted-foreground">{timeAgo(tiding.created_date)}</span>
+        <div className="min-w-0 flex-1">
+          {/* Only the "top part" (header + body text) opens the tiding's page.
+              Media gets its own zone below: a video has its own controls, and
+              tapping play/scrub should never also navigate away underneath it. */}
+          <div onClick={openTidingView} className="cursor-pointer">
+            {/* Inline header, X-style: name, rank, dot, time */}
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMessageSubject?.(tiding.author_subject_id);
+                }}
+                className="max-w-full truncate text-[15px] font-semibold leading-tight hover:underline"
+              >
+                {handle}
+              </button>
+              <RankBadge rank={rank} size="xs" />
+              <span className="text-sm text-muted-foreground">·</span>
+              <span className="text-sm text-muted-foreground">{timeAgo(tiding.created_date)}</span>
+            </div>
+
+            {tiding.body && (
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] leading-normal text-foreground/95">
+                {tiding.body}
+              </p>
+            )}
           </div>
 
-          {tiding.body && (
-            <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] leading-normal text-foreground/95">
-              {tiding.body}
-            </p>
-          )}
-
-          <MediaGrid media={tiding.media} kind={tiding.media_kind} poster={tiding.media_poster} />
+          <div onClick={(e) => e.stopPropagation()}>
+            <MediaGrid media={tiding.media} kind={tiding.media_kind} poster={tiding.media_poster} />
+          </div>
 
           {tiding.poll_options?.length >= 2 && (
             <div onClick={(e) => e.stopPropagation()}>
