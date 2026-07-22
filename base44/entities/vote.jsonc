@@ -1,0 +1,28 @@
+// Vote: one subject's choice on a poll.
+//
+// The tally lives on the Tiding (poll_votes), written by the server. This record
+// exists to enforce one vote per subject and to let a subject see which option
+// they chose. Individual votes are private, like X's polls, only the totals are
+// public; the tally on the Tiding is what everyone sees.
+{
+  "name": "Vote",
+  "type": "object",
+  "properties": {
+    "tiding_id": { "type": "string", "description": "The poll tiding." },
+    "subject_id": { "type": "string", "description": "The voting subject." },
+    "user_email": { "type": "string", "description": "The voting account (for own-vote lookups)." },
+    "option_index": { "type": "number", "description": "Which option they chose." }
+  },
+  "required": ["tiding_id", "subject_id", "option_index"],
+  "rls": {
+    "create": true,
+    "read": {
+      "$or": [
+        { "data.user_email": "{{user.email}}" },
+        { "user_condition": { "role": "admin" } }
+      ]
+    },
+    "update": false,
+    "delete": false
+  }
+}

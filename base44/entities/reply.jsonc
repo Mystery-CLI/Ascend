@@ -1,0 +1,43 @@
+// Reply: a voice added beneath a tiding (a comment).
+//
+// Public, like the tavern itself. The renown a reply earns its tiding's author
+// is granted by the server when the reply is made.
+{
+  "name": "Reply",
+  "type": "object",
+  "properties": {
+    "tiding_id": {
+      "type": "string",
+      "description": "The tiding this reply belongs to."
+    },
+    "author_subject_id": {
+      "type": "string",
+      "description": "The Subject who replied."
+    },
+    "author_email": {
+      "type": "string",
+      "description": "The replying account."
+    },
+    "author_handle": {
+      "type": "string",
+      "description": "The replier's name at time of reply."
+    },
+    "body": {
+      "type": "string",
+      "description": "The reply text.",
+      "maxLength": 400
+    }
+  },
+  "required": ["tiding_id", "body"],
+  "rls": {
+    "create": true,
+    "read": true,
+    "update": false,
+    "delete": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "user_condition": { "role": "admin" } }
+      ]
+    }
+  }
+}

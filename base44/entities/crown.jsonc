@@ -1,0 +1,24 @@
+// Crown: the state of the throne. A single row for the whole realm.
+//
+// Holds who currently reigns, when their week ends, and the standing Decree.
+// Public to read (everyone should know who rules and what has been decreed), but
+// only the server writes it, through the crown and realm functions.
+{
+  "name": "Crown",
+  "type": "object",
+  "properties": {
+    "monarch_id": { "type": "string", "description": "Subject id of the reigning Monarch." },
+    "monarch_handle": { "type": "string" },
+    "crowned_at": { "type": "string", "format": "date-time" },
+    "reign_ends_at": { "type": "string", "format": "date-time" },
+    "week_key": { "type": "number", "description": "The week this reign belongs to." },
+    "decree": { "type": "string", "maxLength": 140, "description": "The King's standing Decree." },
+    "decree_day": { "type": "string", "description": "The day the current Decree was set." }
+  },
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": true,
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": false
+  }
+}

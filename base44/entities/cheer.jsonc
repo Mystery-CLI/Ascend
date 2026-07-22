@@ -1,0 +1,35 @@
+// Cheer: raising a tankard to a tiding (a like).
+//
+// One cheer per subject per tiding. The record itself is public (so the UI can
+// show who has cheered and highlight your own), but the renown it grants to the
+// tiding's author is awarded by the server, not by this record's existence.
+{
+  "name": "Cheer",
+  "type": "object",
+  "properties": {
+    "tiding_id": {
+      "type": "string",
+      "description": "The tiding being cheered."
+    },
+    "subject_id": {
+      "type": "string",
+      "description": "The Subject who cheered."
+    },
+    "user_email": {
+      "type": "string",
+      "description": "The cheering account (for lookups)."
+    }
+  },
+  "required": ["tiding_id", "subject_id"],
+  "rls": {
+    "create": true,
+    "read": true,
+    "update": false,
+    "delete": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "user_condition": { "role": "admin" } }
+      ]
+    }
+  }
+}

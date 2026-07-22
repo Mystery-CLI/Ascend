@@ -1,0 +1,40 @@
+// Conversation: a private thread between two subjects in the Rookery.
+//
+// There is exactly one per pair, keyed by their two subject ids sorted so
+// initiator does not matter (a = the smaller id, b = the larger). Its status
+// captures the whole rank-gated hook:
+//   pending - one side reached across a rank line and the other has not yet
+//             answered (a peasant's Audience request, or a noble's Summons).
+//   open    - both may now speak freely, unlocked the moment the non-initiator
+//             sent their first message.
+//
+// Only the server writes these; clients read only the conversations they are in.
+{
+  "name": "Conversation",
+  "type": "object",
+  "properties": {
+    "a_id": { "type": "string" },
+    "a_email": { "type": "string" },
+    "a_handle": { "type": "string" },
+    "b_id": { "type": "string" },
+    "b_email": { "type": "string" },
+    "b_handle": { "type": "string" },
+    "status": { "type": "string", "enum": ["pending", "open"], "default": "pending" },
+    "initiator_id": { "type": "string" },
+    "last_message_at": { "type": "string", "format": "date-time" },
+    "last_preview": { "type": "string" },
+    "last_sender_id": { "type": "string" }
+  },
+  "required": ["a_id", "b_id"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": {
+      "$or": [
+        { "data.a_email": "{{user.email}}" },
+        { "data.b_email": "{{user.email}}" }
+      ]
+    },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": false
+  }
+}

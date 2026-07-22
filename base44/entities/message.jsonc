@@ -1,0 +1,30 @@
+// Message: one raven carried between two subjects.
+//
+// Created only by the server, after the rank rules have been checked, so a
+// crafted request cannot slip a message past an Audience that was never granted.
+// Each carries both parties' emails so a subject may read a thread they are in
+// and no other.
+{
+  "name": "Message",
+  "type": "object",
+  "properties": {
+    "conversation_id": { "type": "string" },
+    "from_id": { "type": "string" },
+    "from_email": { "type": "string" },
+    "from_handle": { "type": "string" },
+    "to_email": { "type": "string" },
+    "body": { "type": "string", "maxLength": 1000 }
+  },
+  "required": ["conversation_id", "from_id", "body"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": {
+      "$or": [
+        { "data.from_email": "{{user.email}}" },
+        { "data.to_email": "{{user.email}}" }
+      ]
+    },
+    "update": false,
+    "delete": false
+  }
+}

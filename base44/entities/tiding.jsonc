@@ -1,0 +1,101 @@
+// Tiding: a piece of news posted on the tavern board.
+//
+// The tavern is a public square. Anyone, of any rank, may post and be read by
+// all. Rank does not decide whether you can speak, only what extra powers you
+// wield (a Knight can Champion a tiding, a Noble can Proclaim one).
+//
+// The cheer and reply counts are kept here as running totals, written only by
+// the server so they cannot be inflated. The author's handle is stored for
+// display, but their live rank is looked up fresh so a peasant's old tiding
+// shows their crown once they have risen.
+{
+  "name": "Tiding",
+  "type": "object",
+  "properties": {
+    "author_subject_id": {
+      "type": "string",
+      "description": "The Subject who posted this. Used to show their live rank."
+    },
+    "author_email": {
+      "type": "string",
+      "description": "The posting account."
+    },
+    "author_handle": {
+      "type": "string",
+      "description": "The author's name at time of posting (display convenience)."
+    },
+    "body": {
+      "type": "string",
+      "description": "The tiding itself.",
+      "maxLength": 600
+    },
+    "media": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Attached media URLs: up to 4 images, or a single short video."
+    },
+    "media_kind": {
+      "type": "string",
+      "enum": ["image", "video"],
+      "description": "Whether the attached media are images or a video."
+    },
+    "media_poster": {
+      "type": "string",
+      "description": "Poster/thumbnail image URL for a video, captured at upload time."
+    },
+    "poll_options": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "2-4 poll choices, if this tiding is a poll."
+    },
+    "poll_votes": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Vote tally per option, parallel to poll_options. Server-written only.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "poll_closes_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the poll stops accepting votes."
+    },
+    "cheers_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Running total of cheers. Server-written only.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "replies_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Running total of replies. Server-written only.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "championed_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "If set and in the future, this tiding is Championed to the top (a Knight's power). Server-written.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "proclaimed": {
+      "type": "boolean",
+      "default": false,
+      "description": "A Noble's Proclamation: pinned kingdom-wide. Server-written.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    }
+  },
+  "required": ["body"],
+  "rls": {
+    "create": true,
+    "read": true,
+    // Counts and power-flags are changed by the server; authors do not edit
+    // their tidings in this version.
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "user_condition": { "role": "admin" } }
+      ]
+    }
+  }
+}

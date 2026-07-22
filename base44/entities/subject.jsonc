@@ -1,0 +1,170 @@
+// Subject: a citizen of the realm.
+//
+// This is the public face of every account. Anyone in the kingdom can see a
+// subject's handle, crest, and RANK, because the whole point of Ascend is that
+// standing is visible. But a subject's exact RENOWN (their score) is theirs
+// alone, and neither renown nor rank can be written by the person who owns them.
+// Only the crown's own hand, the server, moves those numbers. That is what
+// stops a peasant from simply declaring themselves King.
+{
+  "name": "Subject",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string",
+      "description": "The account this subject belongs to. Used to find your own subject."
+    },
+    "handle": {
+      "type": "string",
+      "description": "The name shown throughout the realm",
+      "maxLength": 24
+    },
+    "avatar_url": {
+      "type": "string",
+      "description": "The subject's portrait / crest image"
+    },
+    "bio": {
+      "type": "string",
+      "description": "A short line shown on their crest page",
+      "maxLength": 160
+    },
+    "rank": {
+      "type": "string",
+      "enum": ["peasant", "freeman", "knight", "noble", "monarch"],
+      "default": "peasant",
+      "description": "Public standing. Set only by the server, never by the subject.",
+      "rls": {
+        // Anyone may see a subject's rank (no read restriction).
+        // Only the server (admin role) may set it.
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "renown": {
+      "type": "number",
+      "default": 0,
+      "description": "The subject's score. Private to them, and only the server may change it.",
+      "rls": {
+        // A subject sees only their own renown; the server sees everyone's,
+        // which it needs to crown the weekly Monarch.
+        "read": {
+          "$or": [
+            { "data.user_email": "{{user.email}}" },
+            { "user_condition": { "role": "admin" } }
+          ]
+        },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "summons_used": {
+      "type": "number",
+      "default": 0,
+      "description": "Downward Ravens (Summons) sent today. Reset daily by the server.",
+      "rls": {
+        "read": {
+          "$or": [
+            { "data.user_email": "{{user.email}}" },
+            { "user_condition": { "role": "admin" } }
+          ]
+        },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "summons_date": {
+      "type": "string",
+      "description": "The day summons_used counts for (YYYY-MM-DD). Server-managed.",
+      "rls": {
+        "read": {
+          "$or": [
+            { "data.user_email": "{{user.email}}" },
+            { "user_condition": { "role": "admin" } }
+          ]
+        },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "is_ai": {
+      "type": "boolean",
+      "default": false,
+      "description": "True for the realm's AI citizens. Server-set only.",
+      "rls": {
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "personality": {
+      "type": "string",
+      "description": "For AI citizens: the voice they post in. Server-set only.",
+      "rls": {
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "last_champion_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this subject last Championed a tiding (Knight power cooldown). Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "last_proclaim_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this subject last issued a Proclamation (Noble power cooldown). Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "last_bounty_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this subject last granted a Bounty (Noble power cooldown). Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "week_renown": {
+      "type": "number",
+      "default": 0,
+      "description": "Renown earned this week; the Crown is decided by it. Private, server-set.",
+      "rls": {
+        "read": {
+          "$or": [
+            { "data.user_email": "{{user.email}}" },
+            { "user_condition": { "role": "admin" } }
+          ]
+        },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "week_key": {
+      "type": "number",
+      "description": "Which week week_renown counts for. Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "heeded_day": {
+      "type": "string",
+      "description": "The day this subject last heeded the King's Decree (YYYY-MM-DD). Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "game_day": {
+      "type": "string",
+      "description": "The day this subject last played the day's trivia (YYYY-MM-DD). Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "game_correct": {
+      "type": "boolean",
+      "description": "Whether today's trivia answer was correct. Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    }
+  },
+  "required": ["user_email", "handle"],
+  "rls": {
+    // A subject is minted once, when a person first enters the realm.
+    "create": true,
+    // Everyone can see everyone: the hierarchy is public by design.
+    "read": true,
+    // You may edit your own crest (handle, portrait, bio). The server (admin)
+    // may edit anyone, which is how renown and rank get updated. The field-level
+    // rules above still forbid a subject from touching rank or renown.
+    "update": {
+      "$or": [
+        { "data.user_email": "{{user.email}}" },
+        { "user_condition": { "role": "admin" } }
+      ]
+    },
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}
