@@ -36,8 +36,8 @@
     },
     "media_kind": {
       "type": "string",
-      "enum": ["image", "video", "audio"],
-      "description": "Whether the attached media are images, a video, or a sound/music clip."
+      "enum": ["image", "video"],
+      "description": "Whether the attached media are images or a video."
     },
     "media_poster": {
       "type": "string",

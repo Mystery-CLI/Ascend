@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Loader2, ImagePlus, X, ListChecks, Plus, Music2 } from "lucide-react";
+import { Loader2, ImagePlus, X, ListChecks, Plus } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { cn } from "@/lib/utils";
@@ -19,17 +19,15 @@ const DURATIONS = [
  *
  * Media go straight to Base44 storage (which returns a public URL) before the
  * tiding is posted, so the post itself just carries the URLs. Up to 4 images,
- * or a single short video, or a single sound/music clip.
+ * or a single short video.
  */
 const MAX = 600;
 const MAX_IMAGES = 4;
 const MAX_VIDEO_MB = 50;
-const MAX_AUDIO_MB = 25;
 
 export function Composer({ me, draft, setDraft, onPost, posting }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
-  const audioFileRef = useRef(null);
   const [media, setMedia] = useState([]); // { url, kind }
   const [mediaPoster, setMediaPoster] = useState(null); // video thumbnail URL
   const [uploading, setUploading] = useState(false);
@@ -46,8 +44,6 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
   const over = draft.length > MAX;
   const initial = (me?.handle || "?").charAt(0).toUpperCase();
   const hasVideo = media.some((m) => m.kind === "video");
-  const hasAudio = media.some((m) => m.kind === "audio");
-  const hasExclusiveMedia = hasVideo || hasAudio; // one clip, on its own, no images alongside
 
   const insertEmoji = (emoji) => {
     const el = ref.current;
@@ -73,55 +69,17 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
 
     const video = files.find((f) => f.type.startsWith("video/"));
     if (video) {
-      if (media.length > 0) return setError("Post a video on its own, not with images or sound.");
+      if (media.length > 0) return setError("Post a video on its own, not with images.");
       if (video.size > MAX_VIDEO_MB * 1024 * 1024)
         return setError(`Keep the video under ${MAX_VIDEO_MB}MB.`);
       await uploadVideo(video);
       return;
     }
 
-    if (hasExclusiveMedia) return setError("Post a video or sound clip on its own, not with images.");
+    if (hasVideo) return setError("Post a video on its own, not with images.");
     const room = MAX_IMAGES - media.length;
     if (room <= 0) return setError(`Up to ${MAX_IMAGES} images.`);
     await uploadImages(files.filter((f) => f.type.startsWith("image/")).slice(0, room));
-  };
-
-  // A separate, visibly labelled entry point for sound: the earlier version
-  // buried audio inside the same picture-icon picker with no visual hint it
-  // could take audio at all, which is exactly as undiscoverable as it sounds.
-  //
-  // This button takes a sound file OR a video (to pull its audio track from,
-  // via the same trick the AudioPlayer itself relies on: an <audio> tag can
-  // play the audio track straight out of a video file, no server transcode
-  // needed). Some mobile file pickers do not actually respect `accept` and
-  // will still list pictures, so a picture is rejected here explicitly
-  // rather than trusted to the OS to have filtered it out. A video with no
-  // audio track at all is rejected too, checked client-side before upload.
-  const onAudioFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setError("");
-    if (media.length > 0) return setError("Post a sound clip on its own, not with images or video.");
-
-    if (file.type.startsWith("image/")) {
-      return setError("A picture cannot go here, only a sound clip or a video with sound.");
-    }
-    if (!file.type.startsWith("audio/") && !file.type.startsWith("video/")) {
-      return setError("Choose a sound clip or a video with sound.");
-    }
-    if (file.size > MAX_AUDIO_MB * 1024 * 1024) return setError(`Keep the clip under ${MAX_AUDIO_MB}MB.`);
-
-    if (file.type.startsWith("video/")) {
-      setUploading(true);
-      const audible = await videoHasAudio(file).catch(() => false);
-      if (!audible) {
-        setUploading(false);
-        return setError("That video has no sound to pull the audio from.");
-      }
-    }
-
-    await uploadAudio(file);
   };
 
   const uploadImages = async (files) => {
@@ -154,19 +112,6 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
       } catch {
         /* poster is a nicety; the #t fallback still shows a frame */
       }
-    } catch {
-      setError("That upload failed. Try again.");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const uploadAudio = async (file) => {
-    setUploading(true);
-    try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      if (!file_url) throw new Error();
-      setMedia([{ url: file_url, kind: "audio", name: file.name }]);
     } catch {
       setError("That upload failed. Try again.");
     } finally {
@@ -240,41 +185,22 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
           {/* Media previews */}
           {media.length > 0 && (
             <div className={cn("mt-2 grid gap-1.5", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
-              {media.map((m, i) =>
-                m.kind === "audio" ? (
-                  <div
-                    key={i}
-                    className="relative flex items-center gap-2.5 overflow-hidden rounded-xl border border-primary/30 bg-primary/[0.06] px-3 py-2.5"
+              {media.map((m, i) => (
+                <div key={i} className="group relative overflow-hidden rounded-xl border border-border">
+                  {m.kind === "video" ? (
+                    <video src={m.url} className="max-h-64 w-full bg-black" muted />
+                  ) : (
+                    <img src={m.url} alt="" className="aspect-video w-full object-cover" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeMedia(i)}
+                    className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-black"
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-                      <Music2 className="h-4 w-4" />
-                    </div>
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground/90">{m.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeMedia(i)}
-                      className="shrink-0 rounded-full p-1 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <div key={i} className="group relative overflow-hidden rounded-xl border border-border">
-                    {m.kind === "video" ? (
-                      <video src={m.url} className="max-h-64 w-full bg-black" muted />
-                    ) : (
-                      <img src={m.url} alt="" className="aspect-video w-full object-cover" />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeMedia(i)}
-                      className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-black"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )
-              )}
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -345,7 +271,7 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                disabled={uploading || hasExclusiveMedia || !!poll}
+                disabled={uploading || hasVideo || !!poll}
                 title="Add images or a short video"
                 className="flex h-9 w-9 items-center justify-center rounded-full text-primary transition hover:bg-primary/10 disabled:opacity-40"
               >
@@ -357,22 +283,6 @@ export function Composer({ me, draft, setDraft, onPost, posting }) {
                 accept="image/*,video/*"
                 multiple
                 onChange={onFiles}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => audioFileRef.current?.click()}
-                disabled={uploading || hasExclusiveMedia || !!poll}
-                title="Add a sound clip, or a video to pull audio from"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-primary transition hover:bg-primary/10 disabled:opacity-40"
-              >
-                <Music2 className="h-5 w-5" />
-              </button>
-              <input
-                ref={audioFileRef}
-                type="file"
-                accept="audio/*,video/*"
-                onChange={onAudioFile}
                 className="hidden"
               />
               <button
@@ -448,49 +358,6 @@ function capturePoster(file) {
     v.onerror = () => done(null);
     // Safety timeout so a stubborn file cannot hang the upload.
     setTimeout(() => done(null), 8000);
-  });
-}
-
-/**
- * Whether a video file actually has an audio track, checked entirely
- * client-side (no upload, no server round-trip). Chrome/Edge/Safari expose
- * `audioTracks` right after metadata loads; when a browser does not, this
- * falls back to a brief silent, muted play so `webkitAudioDecodedByteCount`
- * (which only populates once something has actually decoded) has a chance
- * to report anything at all.
- */
-function videoHasAudio(file) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const v = document.createElement("video");
-    v.muted = true;
-    v.playsInline = true;
-    v.preload = "metadata";
-    v.src = url;
-
-    const done = (result) => {
-      URL.revokeObjectURL(url);
-      resolve(result);
-    };
-
-    const knownFromTracks = () => {
-      if (typeof v.mozHasAudio === "boolean") return v.mozHasAudio;
-      if (v.audioTracks) return v.audioTracks.length > 0;
-      return null; // unknown yet, needs a decode nudge below
-    };
-
-    v.onloadedmetadata = () => {
-      const known = knownFromTracks();
-      if (known !== null) return done(known);
-      v.play()
-        .then(() => {
-          setTimeout(() => done((v.webkitAudioDecodedByteCount || 0) > 0), 300);
-        })
-        .catch(() => done(false));
-    };
-    v.onerror = () => done(false);
-    // A stubborn file should reject rather than hang the composer forever.
-    setTimeout(() => done(false), 8000);
   });
 }
 
