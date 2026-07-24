@@ -17,6 +17,7 @@ import {
   RENOWN,
   adjustRenown,
   seedRenownForRank,
+  notify,
   jsonResponse as json,
 } from "../../shared/renown.ts";
 
@@ -244,7 +245,18 @@ Deno.serve(async (req) => {
         replies_count: (target.replies_count || 0) + 1,
       });
       // A reply earns nothing on its own now, from a citizen or a real
-      // subject alike; only being cheered does.
+      // subject alike; only being cheered does. It still notifies the real
+      // author, though: to them, someone replied, full stop.
+      await notify(
+        svc,
+        target.author_email,
+        target.author_subject_id,
+        speaker.id,
+        speaker.handle,
+        "reply_tiding",
+        `${speaker.handle} replied to your tiding.`,
+        target.id
+      );
 
       return json({ acted: true, by: speaker.handle, on: target.id });
     }
