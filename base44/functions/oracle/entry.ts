@@ -49,6 +49,18 @@ function isAboutTheRealm(question: string): boolean {
   return REALM_TERMS.some((t) => q.includes(t));
 }
 
+// A little in-voice flavour on the fast (no second AI call) path, so it
+// doesn't read as a bare fact dump every single time.
+const OPENERS = [
+  "The Oracle's gaze drifts beyond the realm's borders: ",
+  "Peering past the kingdom's walls, the Oracle speaks: ",
+  "The Oracle consults the wider world and answers: ",
+  "Beyond these gates, the Oracle sees this: ",
+];
+function pickOpener(): string {
+  return OPENERS[Math.floor(Math.random() * OPENERS.length)];
+}
+
 const DAILY_LIMIT = 20;
 
 function todayStr() {
@@ -162,6 +174,20 @@ Deno.serve(async (req) => {
         } catch {
           // Grounding failed; the Oracle still answers from its own
           // knowledge below, just without a fresh-facts boost.
+        }
+
+        // Speed path: once the fact is in hand, wrap it in the Oracle's
+        // voice with a plain template instead of a SECOND InvokeLLM call.
+        // That second call was what made general-knowledge questions feel
+        // twice as slow as realm ones for no real gain -- the fact itself is
+        // already reliable, it doesn't need an AI rewrite to sound right.
+        // Only realm questions, and the rare case where grounding itself
+        // failed, fall through to the full character-voiced call below.
+        if (webFact) {
+          const answer = `${pickOpener()}${webFact}`.trim().slice(0, 800);
+          const newUsed = used + 1;
+          await svc.entities.Subject.update(me.id, { oracle_day: today, oracle_used: newUsed });
+          return json({ answer, used: newUsed, limit: DAILY_LIMIT });
         }
       }
 
