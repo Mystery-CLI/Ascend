@@ -280,7 +280,8 @@ Deno.serve(async (req) => {
             me.handle,
             "cheer_reply",
             `${me.handle} cheered your reply.`,
-            reply.tiding_id
+            reply.tiding_id,
+            replyId
           );
         }
         // Cheering earns the cheerer nothing; only being cheered pays out.
@@ -369,7 +370,8 @@ Deno.serve(async (req) => {
           me.handle,
           "reply_reply",
           `${me.handle} replied to your reply.`,
-          tidingId
+          tidingId,
+          parentReplyId
         );
       } else {
         await notify(

@@ -30,7 +30,7 @@ const TONE = {
  * first. Opening this page marks everything read in one batch (matching how
  * most apps clear the badge the moment you look at the list, not per-row).
  */
-export function Notifications({ me, user, onOpenProfile }) {
+export function Notifications({ me, user, onOpenProfile, onOpenTiding, onGoToThrone }) {
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,11 +70,22 @@ export function Notifications({ me, user, onOpenProfile }) {
         ) : (
           rows.map((n) => {
             const Icon = ICON[n.kind] || Beer;
+            // The reason for the notification, not the person: a cheer or
+            // reply opens the actual tiding (or, for a cheer/reply on a
+            // reply, that exact reply's thread). Only kinds with nothing to
+            // show (a Bounty, being crowned) fall back to a profile or the
+            // Throne Room instead.
+            const openTarget = () => {
+              if (n.kind === "crowned") return onGoToThrone?.();
+              if (n.tiding_id) return onOpenTiding?.(n.tiding_id, n.reply_id);
+              if (n.actor_subject_id) return onOpenProfile?.(n.actor_subject_id);
+            };
+            const clickable = n.kind === "crowned" || !!n.tiding_id || !!n.actor_subject_id;
             return (
               <button
                 key={n.id}
-                onClick={() => n.actor_subject_id && onOpenProfile?.(n.actor_subject_id)}
-                disabled={!n.actor_subject_id}
+                onClick={openTarget}
+                disabled={!clickable}
                 className={cn(
                   "flex w-full items-start gap-3 border-b border-border px-4 py-3.5 text-left transition last:border-b-0 hover:bg-foreground/[0.02]",
                   !n.read && "bg-primary/[0.04]"

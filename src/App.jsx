@@ -50,8 +50,33 @@ export default function App() {
   const [ravenTarget, setRavenTarget] = useState(null); // subject to open a thread with
   const [profileSubjectId, setProfileSubjectId] = useState(null); // subject whose crest is showing
   const [unreadCount, setUnreadCount] = useState(0);
+  const [tidingView, setTidingView] = useState(null); // { tiding, author, replyId } deep-linked from a notification
   const meRef = useRef(null);
   meRef.current = me;
+
+  // A notification points at a specific tiding (and sometimes a specific
+  // reply within it): fetch fresh rather than assume it's still in the
+  // capped feed window, since an older tiding may have scrolled out of it.
+  const openTidingFromNotification = useCallback(
+    async (tidingId, replyId) => {
+      if (!tidingId) return;
+      try {
+        const tiding = await base44.entities.Tiding.get(tidingId);
+        if (!tiding) {
+          notify("That tiding no longer exists.");
+          return;
+        }
+        const author =
+          subjects[tiding.author_subject_id] ||
+          (await base44.entities.Subject.get(tiding.author_subject_id).catch(() => null));
+        setTidingView({ tiding, author, replyId: replyId || null });
+        setView("tidingView");
+      } catch {
+        notify("Could not open that tiding.");
+      }
+    },
+    [subjects]
+  );
 
   // Start a raven to a subject (from a profile's Raven button). Requires
   // fealty; opens the Rookery.
@@ -647,7 +672,41 @@ export default function App() {
 
       {view === "notifications" && me && (
         <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
-          <Notifications me={me} user={user} onOpenProfile={openProfile} />
+          <Notifications
+            me={me}
+            user={user}
+            onOpenProfile={openProfile}
+            onOpenTiding={openTidingFromNotification}
+            onGoToThrone={() => setView("throne")}
+          />
+        </div>
+      )}
+
+      {/* Deep-linked from a notification: the tiding itself (and, for a
+          cheer/reply on a specific reply, that exact reply's thread), not
+          just the actor who caused the notification. */}
+      {view === "tidingView" && tidingView && (
+        <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
+          <TidingCard
+            tiding={tidingView.tiding}
+            author={tidingView.author}
+            cheered={myCheers.has(tidingView.tiding.id)}
+            onCheer={cheer}
+            onReply={reply}
+            myRank={me?.rank}
+            onChampion={champion}
+            onProclaim={proclaim}
+            onBounty={bounty}
+            myVoteIndex={myVotes.has(tidingView.tiding.id) ? myVotes.get(tidingView.tiding.id) : undefined}
+            onVote={vote}
+            onOpenProfile={openProfile}
+            busy={busy}
+            myReplyCheers={myReplyCheers}
+            onCheerReply={cheerReply}
+            autoOpen
+            initialFocusReplyId={tidingView.replyId}
+            onExit={() => setView("notifications")}
+          />
         </div>
       )}
 

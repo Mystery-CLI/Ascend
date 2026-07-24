@@ -113,7 +113,8 @@ export async function notify(
   actorHandle: string,
   kind: string,
   body: string,
-  tidingId?: string
+  tidingId?: string,
+  replyId?: string
 ) {
   if (!recipientEmail || recipientSubjectId === actorId) return;
   await svc.entities.Notification.create({
@@ -124,6 +125,7 @@ export async function notify(
     kind,
     body,
     tiding_id: tidingId,
+    reply_id: replyId,
     read: false,
   });
 }

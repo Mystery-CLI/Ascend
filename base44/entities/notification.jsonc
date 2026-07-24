@@ -52,6 +52,11 @@
       "description": "The tiding this is about, if any.",
       "rls": { "write": { "user_condition": { "role": "admin" } } }
     },
+    "reply_id": {
+      "type": "string",
+      "description": "The specific reply this is about, if any (cheer_reply, reply_reply): the recipient taps through to this exact reply's focused thread, not just the tiding's top level.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
     "read": {
       "type": "boolean",
       "default": false,

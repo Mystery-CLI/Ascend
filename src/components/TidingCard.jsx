@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { MessageCircle, Loader2, Megaphone, Star, Coins, ArrowLeft, ChevronRight } from "lucide-react";
 import { RankBadge } from "@/components/RankBadge";
@@ -69,6 +69,9 @@ export function TidingCard({
   busy,
   myReplyCheers = EMPTY_SET,
   onCheerReply,
+  autoOpen = false,
+  initialFocusReplyId = null,
+  onExit,
 }) {
   // X-style navigation: tapping the tiding's body opens its own full page (the
   // tiding plus its top-level replies); tapping into a reply from there pushes
@@ -138,11 +141,32 @@ export function TidingCard({
     setViewingTiding(true);
   };
 
+  // Deep-linked from a notification: open straight to this tiding (and, for
+  // a cheer/reply on a specific reply, straight to that reply's own focused
+  // thread) the moment this card mounts, instead of waiting for a tap.
+  useEffect(() => {
+    if (!autoOpen) return;
+    (async () => {
+      await ensureRepliesLoaded();
+      setReplyStack(initialFocusReplyId ? [initialFocusReplyId] : []);
+      setViewingTiding(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
+
   const pushReply = (replyId) => setReplyStack((prev) => [...prev, replyId]);
   const backOneLevel = () =>
     setReplyStack((prev) => {
       if (prev.length > 0) return prev.slice(0, -1);
-      setViewingTiding(false); // already at the tiding's own page: back closes it
+      // Already at the tiding's own page. A card opened inline in the feed
+      // just closes back to itself; one deep-linked from a notification has
+      // no feed to fall back into, so it hands control back to whoever
+      // opened it instead.
+      if (onExit) {
+        onExit();
+      } else {
+        setViewingTiding(false);
+      }
       return prev;
     });
   const focusReplyId = replyStack[replyStack.length - 1] || null;
