@@ -6,11 +6,15 @@
 // crucially, REACT to real subjects: post a tiding and a citizen may answer you
 // in character. That is what makes the place feel alive rather than staged.
 //
-// Two actions:
-//   seed  - one-time, owner-only: generate the roster and their opening tidings.
-//   pulse - throttled, any subject: have a citizen react to recent real posts.
-//           AI is only spent when there is genuine activity to respond to, so
-//           the credit cost tracks real use rather than running on a clock.
+// Three actions:
+//   seed    - one-time, owner-only: generate the roster and their opening tidings.
+//   enrich  - owner-only, repeatable: post another batch of tidings from the
+//             EXISTING roster (no new citizens), covering a real mix of
+//             weighty and throwaway subjects. Run this whenever the tavern
+//             starts feeling thin again.
+//   pulse   - throttled, any subject: have a citizen react to recent real posts.
+//             AI is only spent when there is genuine activity to respond to, so
+//             the credit cost tracks real use rather than running on a clock.
 
 import { createClientFromRequest } from "npm:@base44/sdk";
 import {
@@ -66,7 +70,7 @@ Deno.serve(async (req) => {
       }
 
       // 1) Generate a varied roster in one AI call.
-      const rosterRes = await ai.InvokeLLM({
+      const rosterRes: any = await ai.InvokeLLM({
         prompt:
           `Invent ${CITIZEN_COUNT} inhabitants of a medieval-fantasy kingdom social app called Ascend, ` +
           `where people gather in a tavern to share news. Give each a short medieval handle (a name or ` +
@@ -120,7 +124,7 @@ Deno.serve(async (req) => {
       const voiceLines = roster
         .map((c: any) => `- ${c.handle}: ${c.personality}`)
         .join("\n");
-      const tidingsRes = await ai.InvokeLLM({
+      const tidingsRes: any = await ai.InvokeLLM({
         prompt:
           `These are citizens of the kingdom tavern and how they speak:\n${voiceLines}\n\n` +
           `Write 1 to 2 short tavern posts (tidings) for each, 1-2 sentences, strictly in that ` +
@@ -184,6 +188,103 @@ Deno.serve(async (req) => {
       }
 
       return json({ seeded: true, citizens: citizenList.length, tidings: posted });
+    }
+
+    /* ---- enrich ---------------------------------------------------------
+       Adds a fresh batch of tidings from the EXISTING citizen roster (no new
+       citizens created, unlike seed) so the tavern keeps feeling lived-in
+       beyond the one-time opening batch. Deliberately mixes weighty and
+       throwaway subjects and asks for real prose craft, not just a one-line
+       gossip stub, since that first batch leaned hard on rumour/jokes/boasts
+       and read thin after a few screens of it. */
+    if (payload.action === "enrich") {
+      if (!STEWARDS.includes(user.email)) {
+        return json({ error: "Only a steward of the realm may enrich the tavern." }, 403);
+      }
+
+      const citizens = await svc.entities.Subject.filter({ is_ai: true });
+      if (citizens.length === 0) {
+        return json({ error: "No citizens exist yet. Seed the realm first." }, 400);
+      }
+
+      const count = Math.min(Math.max(Number(payload.count) || 24, 1), 40);
+      const voiceLines = citizens
+        .map((c: any) => `- ${c.handle} (${c.rank}): ${c.personality}`)
+        .join("\n");
+
+      const tidingsRes: any = await ai.InvokeLLM({
+        prompt:
+          `These are citizens of a medieval-fantasy kingdom tavern and how they speak:\n${voiceLines}\n\n` +
+          `Write ${count} tavern posts (tidings) total, spread across these citizens (a citizen may post ` +
+          `more than once), strictly in each one's own established voice, medieval-fantasy flavour, no ` +
+          `modern words, no hashtags. Write with genuine craft: 2-4 sentences each, well-composed and ` +
+          `quotable, the way a real, thoughtful person actually writes, not a throwaway one-liner. Cover a ` +
+          `real MIX of subjects across the batch: roughly half should be WEIGHTY and IMPORTANT (a real ` +
+          `dilemma, a moral question, grief, ambition, justice, a hard choice, news from the wider ` +
+          `kingdom), and roughly half RANDOM and LIGHT (a jest, a small complaint, an odd rumour, a boast, ` +
+          `a passing observation). Vary the shape post to post; do not repeat the same sentence structure ` +
+          `twice in a row, and do not let every citizen sound like they are discussing the same topic.`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            tidings: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  handle: { type: "string" },
+                  body: { type: "string" },
+                },
+                required: ["handle", "body"],
+              },
+            },
+          },
+        },
+      });
+
+      const byHandle: Record<string, any> = {};
+      for (const c of citizens) byHandle[c.handle] = c;
+
+      const tidings = tidingsRes?.tidings || [];
+      let posted = 0;
+      const madeTidings: any[] = [];
+      for (const t of tidings) {
+        const author = byHandle[(t.handle || "").toString()];
+        if (!author || !t.body) continue;
+        const tiding = await svc.entities.Tiding.create({
+          author_subject_id: author.id,
+          author_email: author.user_email,
+          author_handle: author.handle,
+          body: t.body.toString().slice(0, 600),
+          cheers_count: 0,
+          replies_count: 0,
+          proclaimed: false,
+        });
+        madeTidings.push(tiding);
+        posted++;
+      }
+
+      // Light organic cross-cheering, same as seed's own step 4: no AI cost,
+      // just entity writes, so tidings and standing feel earned rather than
+      // arriving with a suspicious zero.
+      for (const tiding of madeTidings) {
+        const cheerers = citizens
+          .filter((s: any) => s.id !== tiding.author_subject_id)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, Math.floor(Math.random() * 4));
+        for (const cheerer of cheerers) {
+          await svc.entities.Cheer.create({
+            tiding_id: tiding.id,
+            subject_id: cheerer.id,
+            user_email: cheerer.user_email,
+          });
+          await adjustRenown(svc, tiding.author_subject_id, RENOWN.cheerReceived);
+        }
+        const finalCount = await svc.entities.Cheer.filter({ tiding_id: tiding.id });
+        await svc.entities.Tiding.update(tiding.id, { cheers_count: finalCount.length });
+      }
+
+      return json({ enriched: true, citizens: citizens.length, tidings: posted });
     }
 
     /* ---- pulse --------------------------------------------------------- */
