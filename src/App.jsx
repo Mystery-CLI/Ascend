@@ -10,6 +10,7 @@ import {
   User,
   Bell,
   Search as SearchIcon,
+  Wand2,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { realm, pulse } from "@/lib/realm";
@@ -26,6 +27,7 @@ import { ThroneRoom } from "@/components/ThroneRoom";
 import { Profile } from "@/components/Profile";
 import { Notifications } from "@/components/Notifications";
 import { Search } from "@/components/Search";
+import { Oracle } from "@/components/Oracle";
 import { ToastHost } from "@/components/Toast";
 
 const FEED_LIMIT = 60;
@@ -499,6 +501,14 @@ export default function App() {
             )}
             {me && (
               <SidebarLink
+                active={view === "oracle"}
+                onClick={() => setView("oracle")}
+                icon={Wand2}
+                label="The Oracle"
+              />
+            )}
+            {me && (
+              <SidebarLink
                 active={view === "profile" && profileSubjectId === me.id}
                 onClick={() => openProfile(me.id)}
                 icon={User}
@@ -527,6 +537,18 @@ export default function App() {
             >
               <SearchIcon className="h-5 w-5" />
             </button>
+
+            {/* Desktop reaches the Oracle from the sidebar; this is the
+                mobile-only shortcut, same treatment as the search icon. */}
+            {me && (
+              <button
+                onClick={() => setView("oracle")}
+                className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary hover:text-foreground lg:hidden"
+                title="Ask the Oracle"
+              >
+                <Wand2 className="h-5 w-5" />
+              </button>
+            )}
 
             {me ? (
               <button onClick={() => openProfile(me.id)} className="text-right" title="Your crest">
@@ -679,6 +701,12 @@ export default function App() {
             onOpenTiding={openTidingFromNotification}
             onGoToThrone={() => setView("throne")}
           />
+        </div>
+      )}
+
+      {view === "oracle" && me && (
+        <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
+          <Oracle me={me} />
         </div>
       )}
 

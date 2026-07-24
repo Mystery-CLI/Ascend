@@ -154,6 +154,17 @@
       "type": "boolean",
       "description": "Whether today's trivia answer was correct. Server-set.",
       "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "oracle_day": {
+      "type": "string",
+      "description": "The day oracle_used counts for (YYYY-MM-DD), resets daily. Server-set.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "oracle_used": {
+      "type": "number",
+      "default": 0,
+      "description": "Questions asked of the Oracle today. Server-set, resets when oracle_day rolls over.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
     }
   },
   "required": ["user_email", "handle"],
