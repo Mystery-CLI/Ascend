@@ -106,8 +106,6 @@ Deno.serve(async (req) => {
   }
 
   const user = await base44.auth.me().catch(() => null);
-  if (!user) return json({ error: "You must swear fealty first." }, 401);
-
   const svc = base44.asServiceRole;
 
   let payload: any = {};
@@ -120,6 +118,26 @@ Deno.serve(async (req) => {
   const action = payload.action;
 
   try {
+    // -- check_username: live availability check, X-style. Deliberately the
+    //    ONE action that needs no session at all: a visitor checking a name
+    //    on the signup form has not sworn fealty yet, there is no Base44
+    //    session to check against.
+    if (action === "check_username") {
+      const raw = (payload.username || "").toString().trim().toLowerCase();
+      if (!USERNAME_RE.test(raw)) {
+        return json({
+          available: false,
+          reason: "3-20 characters: lowercase letters, numbers, underscore only.",
+        });
+      }
+      const mine = user ? (await findSubjectByEmail(svc, user.email))?.username : null;
+      if (raw === mine) return json({ available: true, reason: null }); // already yours, unchanged
+      const taken = await usernameTaken(svc, raw);
+      return json({ available: !taken, reason: taken ? "That username is already taken." : null });
+    }
+
+    if (!user) return json({ error: "You must swear fealty first." }, 401);
+
     // -- enter: mint a Subject on first arrival, or return the existing one ---
     if (action === "enter") {
       let subject = await findSubjectByEmail(svc, user.email);
@@ -127,7 +145,14 @@ Deno.serve(async (req) => {
         const handleSeed = (user.full_name || user.email.split("@")[0] || "Wanderer")
           .toString()
           .slice(0, 24);
-        const username = await uniqueUsernameFrom(svc, user.email.split("@")[0] || handleSeed);
+        // A username chosen on the signup form, if the caller sent one and it
+        // is still valid and free; otherwise mint one so onboarding is never
+        // blocked (they can always change it later from their crest).
+        const requested = (payload.username || "").toString().trim().toLowerCase();
+        const username =
+          requested && USERNAME_RE.test(requested) && !(await usernameTaken(svc, requested))
+            ? requested
+            : await uniqueUsernameFrom(svc, user.email.split("@")[0] || handleSeed);
         subject = await svc.entities.Subject.create({
           user_email: user.email,
           handle: handleSeed,
@@ -151,20 +176,6 @@ Deno.serve(async (req) => {
     // All remaining actions require the caller to already be a subject.
     const me = await findSubjectByEmail(svc, user.email);
     if (!me) return json({ error: "Enter the realm first." }, 400);
-
-    // -- check_username: live availability check, X-style ---------------------
-    if (action === "check_username") {
-      const raw = (payload.username || "").toString().trim().toLowerCase();
-      if (!USERNAME_RE.test(raw)) {
-        return json({
-          available: false,
-          reason: "3-20 characters: lowercase letters, numbers, underscore only.",
-        });
-      }
-      if (raw === me.username) return json({ available: true, reason: null }); // your own, unchanged
-      const taken = await usernameTaken(svc, raw, me.id);
-      return json({ available: !taken, reason: taken ? "That username is already taken." : null });
-    }
 
     // -- set_username: the only path that may actually write it ---------------
     if (action === "set_username") {

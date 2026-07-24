@@ -155,21 +155,24 @@ export default function App() {
 
   // Called after a successful oath from the modal: bring the new subject in
   // without a jarring full-page reload.
-  const onAuthed = useCallback(async () => {
-    setGate(null);
-    markFealty();
-    const u = await base44.auth.me().catch(() => null);
-    setUser(u);
-    if (u) {
-      try {
-        const { subject } = await realm("enter");
-        setMe(subject);
-      } catch {
-        /* ignore */
+  const onAuthed = useCallback(
+    async (chosenUsername) => {
+      setGate(null);
+      markFealty();
+      const u = await base44.auth.me().catch(() => null);
+      setUser(u);
+      if (u) {
+        try {
+          const { subject } = await realm("enter", chosenUsername ? { username: chosenUsername } : {});
+          setMe(subject);
+        } catch {
+          /* ignore */
+        }
+        await loadFeed();
       }
-      await loadFeed();
-    }
-  }, [loadFeed]);
+    },
+    [loadFeed]
+  );
 
   // Live tavern: the server rewrites a tiding's counts on every cheer and reply,
   // so subscribing to Tiding covers posts, cheers, and replies alike. A slow

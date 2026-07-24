@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Loader2, Camera, LogOut, Mail, Feather, Check, X as XIcon } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { realm } from "@/lib/realm";
+import { useUsernameCheck } from "@/lib/useUsernameCheck";
 import { RankBadge } from "@/components/RankBadge";
 import { TidingCard } from "@/components/TidingCard";
 import { rankMeta, climbProgress } from "@/lib/ranks";
@@ -216,32 +217,10 @@ function EditForm({ me, onDone, onUpdated }) {
 
   // Live availability check, X-style: debounced, only fires when the
   // username actually differs from what's already yours.
-  const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState(null); // { available, reason } | null
-  const checkTimer = useRef(null);
-  const usernameChanged = username.trim().toLowerCase() !== (me?.username || "");
-
-  useEffect(() => {
-    clearTimeout(checkTimer.current);
-    if (!usernameChanged) {
-      setChecking(false);
-      setCheckResult(null);
-      return;
-    }
-    setChecking(true);
-    checkTimer.current = setTimeout(async () => {
-      try {
-        const res = await realm("check_username", { username: username.trim().toLowerCase() });
-        setCheckResult(res);
-      } catch {
-        setCheckResult({ available: false, reason: "Could not check right now." });
-      } finally {
-        setChecking(false);
-      }
-    }, 400);
-    return () => clearTimeout(checkTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username]);
+  const { checking, result: checkResult, changed: usernameChanged } = useUsernameCheck(
+    username,
+    me?.username || ""
+  );
 
   const dirty =
     handle !== (me?.handle || "") ||

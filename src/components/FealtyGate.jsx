@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { Crown, Loader2, ArrowRight, ArrowLeft, X } from "lucide-react";
+import { Crown, Loader2, ArrowRight, ArrowLeft, X, Check } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { markFealty } from "@/lib/session";
+import { useUsernameCheck } from "@/lib/useUsernameCheck";
 import { cn } from "@/lib/utils";
+
+// One step back from each, so a visitor deep in signup never loses what
+// they already typed.
+const BACK_STEP = { login: "choose", register: "choose", username: "register", verify: "username" };
 
 /**
  * The gate to the realm. Everyone enters here, and everyone enters as a Peasant.
@@ -13,15 +18,23 @@ import { cn } from "@/lib/utils";
  *
  * Two ways to swear fealty: a one-tap Google oath (smoothest), or an email and
  * password with a verification code. The email path walks through register ->
- * verify code -> sign in without making the visitor start over.
+ * CHOOSE A USERNAME (X-style, checked live, before the account is created) ->
+ * verify code -> sign in. Google skips the username step entirely (no page
+ * for it to happen on mid-redirect); those subjects get one auto-minted and
+ * can rename it from their crest afterward, matching how X itself treats an
+ * OAuth signup.
  */
 export function FealtyGate({ onAuthed, onClose, reason }) {
-  const [mode, setMode] = useState("choose"); // choose | login | register | verify
+  const [mode, setMode] = useState("choose"); // choose | login | register | username | verify
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const { checking, result: checkResult, changed: usernameEntered } = useUsernameCheck(username, "");
+  const usernameReady = usernameEntered && !checking && checkResult?.available;
 
   const google = () => {
     // Mark the oath before we leave the page, so that when Google sends the
@@ -59,7 +72,7 @@ export function FealtyGate({ onAuthed, onClose, reason }) {
       await base44.auth.verifyOtp({ email: email.trim(), otpCode: otp.trim() });
       // Verified: sign them straight in with the credentials they just chose.
       await base44.auth.loginViaEmailPassword(email.trim(), password);
-      onAuthed();
+      onAuthed(username.trim().toLowerCase());
     });
 
   return (
@@ -115,7 +128,12 @@ export function FealtyGate({ onAuthed, onClose, reason }) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                mode === "login" ? doLogin() : doRegister();
+                if (mode === "login") {
+                  doLogin();
+                } else {
+                  setError("");
+                  setMode("username"); // choose a name before the account exists, X-style
+                }
               }}
               className="space-y-3"
             >
@@ -135,7 +153,7 @@ export function FealtyGate({ onAuthed, onClose, reason }) {
                 placeholder={mode === "register" ? "choose a password" : "your password"}
               />
               <PrimaryButton busy={busy}>
-                {mode === "login" ? "Enter the realm" : "Take the oath"}
+                {mode === "login" ? "Enter the realm" : "Continue"}
               </PrimaryButton>
               <p className="pt-1 text-center text-xs text-muted-foreground">
                 {mode === "login" ? "New to the realm? " : "Already sworn? "}
@@ -150,6 +168,61 @@ export function FealtyGate({ onAuthed, onClose, reason }) {
                   {mode === "login" ? "Swear fealty" : "Enter instead"}
                 </button>
               </p>
+            </form>
+          )}
+
+          {mode === "username" && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (usernameReady) doRegister();
+              }}
+              className="space-y-3"
+            >
+              <p className="text-sm text-muted-foreground">
+                Choose the @name the realm will know you by. It's yours alone, no one else can take it.
+              </p>
+              <label className="block">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Username
+                </span>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base text-muted-foreground">
+                    @
+                  </span>
+                  <input
+                    value={username}
+                    onChange={(e) =>
+                      setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20))
+                    }
+                    placeholder="username"
+                    autoFocus
+                    autoComplete="off"
+                    className={cn(
+                      "h-11 w-full rounded-xl border bg-background/60 pl-7 pr-9 text-base focus:outline-none",
+                      usernameEntered && checkResult && !checkResult.available
+                        ? "border-destructive/60 focus:border-destructive"
+                        : "border-border focus:border-primary/60"
+                    )}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {usernameEntered &&
+                      (checking ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : checkResult?.available ? (
+                        <Check className="h-4 w-4 text-primary" />
+                      ) : checkResult ? (
+                        <X className="h-4 w-4 text-destructive" />
+                      ) : null)}
+                  </span>
+                </div>
+                {usernameEntered && checkResult?.reason && (
+                  <p className="mt-1 text-[11px] text-destructive">{checkResult.reason}</p>
+                )}
+              </label>
+              <PrimaryButton busy={busy} disabled={!usernameReady}>
+                Take the oath
+              </PrimaryButton>
             </form>
           )}
 
@@ -189,7 +262,7 @@ export function FealtyGate({ onAuthed, onClose, reason }) {
             <button
               onClick={() => {
                 setError("");
-                setMode("choose");
+                setMode(BACK_STEP[mode] || "choose");
               }}
               className="mt-4 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
@@ -224,11 +297,11 @@ function Field({ label, value, onChange, ...props }) {
   );
 }
 
-function PrimaryButton({ busy, children }) {
+function PrimaryButton({ busy, disabled, children }) {
   return (
     <button
       type="submit"
-      disabled={busy}
+      disabled={busy || disabled}
       className={cn(
         "flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
       )}
