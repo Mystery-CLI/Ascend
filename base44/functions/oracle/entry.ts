@@ -7,7 +7,26 @@
 // to stay coherent.
 
 import { createClientFromRequest } from "npm:@base44/sdk";
-import { findSubjectByEmail, jsonResponse as json } from "../../shared/renown.ts";
+import {
+  RENOWN,
+  THRESHOLDS,
+  findSubjectByEmail,
+  jsonResponse as json,
+} from "../../shared/renown.ts";
+
+// The climbing order (Monarch excluded: it's won weekly, not earned by
+// Renown). Built from the SAME THRESHOLDS array realm/entry.ts itself
+// derives rank from, so if a threshold ever changes, the Oracle's numbers
+// change with it automatically instead of quietly going stale.
+const CLIMB_ORDER = ["peasant", "freeman", "knight", "noble"];
+
+function thresholdFor(rank: string): number | undefined {
+  return THRESHOLDS.find((t) => t.rank === rank)?.at;
+}
+
+function cap(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
 
 const DAILY_LIMIT = 20;
 
@@ -59,18 +78,68 @@ Deno.serve(async (req) => {
         .map((h: any) => `${h.role === "user" ? me.handle : "Oracle"}: ${(h.content || "").toString().slice(0, 400)}`)
         .join("\n");
 
+      // Live realm state, fetched fresh on every question rather than baked
+      // into the prompt text, so the Oracle is never answering from a stale
+      // memory of who reigns or what today's Decree is.
+      const crowns = await svc.entities.Crown.list("", 1);
+      const crown = crowns[0];
+      let crownFact: string;
+      if (crown?.monarch_handle) {
+        const daysLeft = crown.reign_ends_at
+          ? Math.max(0, Math.ceil((new Date(crown.reign_ends_at).getTime() - Date.now()) / 86400000))
+          : null;
+        crownFact = `${crown.monarch_handle} currently reigns as Monarch${daysLeft !== null ? ` (about ${daysLeft} day${daysLeft === 1 ? "" : "s"} left in the reign)` : ""}.`;
+      } else {
+        crownFact = "The throne is currently vacant: no real subject has earned any Renown yet this week.";
+      }
+      const decreeFact =
+        crown?.decree && crown?.decree_day === today
+          ? `Today's Decree: "${crown.decree}"`
+          : "No Decree stands today.";
+
+      // The climb, computed from the caller's ACTUAL current Renown, not a
+      // generic description of the ladder.
+      const climbIdx = CLIMB_ORDER.indexOf(me.rank);
+      let climbFact = "";
+      if (climbIdx >= 0 && climbIdx < CLIMB_ORDER.length - 1) {
+        const nextRank = CLIMB_ORDER[climbIdx + 1];
+        const nextAt = thresholdFor(nextRank);
+        if (nextAt != null) {
+          const remaining = Math.max(0, nextAt - (me.renown || 0));
+          climbFact = ` They need ${remaining} more Renown to reach ${cap(nextRank)} (at ${nextAt} total).`;
+        }
+      }
+
+      const thresholdFacts = THRESHOLDS.filter((t) => t.rank !== "peasant")
+        .sort((a, b) => a.at - b.at)
+        .map((t) => `${cap(t.rank)} at ${t.at}`)
+        .join(", ");
+
       const prompt =
         `You are the Oracle of Ascend, a wise, warm, faintly mystical advisor built into a medieval-fantasy ` +
         `social kingdom app. Speak briefly (2-4 sentences), with a touch of old-world flavour, but stay ` +
-        `genuinely clear and useful -- never let the voice get in the way of the answer. ` +
-        `You are speaking with ${me.handle}, currently ranked ${me.rank} of the realm. ` +
-        `Kingdom terms, use them naturally when relevant: Tiding = a post, Cheer = a like, Reply = a comment, ` +
-        `Raven/Rookery = direct messages (rank-gated: reaching up needs an Audience, reaching down costs a ` +
-        `Summons), Crest = a profile, Renown = points (yours alone to see), the rank ladder is ` +
-        `Peasant -> Freeman -> Knight -> Noble -> Monarch, the Monarch is crowned weekly by whoever earns the ` +
-        `most Renown that week and can issue a Decree, Champion/Proclaim/Bounty are Knight/Noble powers. ` +
-        `If asked something with no real answer (idle chat, riddles, general knowledge), just answer normally ` +
-        `in character -- you are not limited to only talking about the app.` +
+        `genuinely clear and useful -- never let the voice get in the way of the answer, and never invent a ` +
+        `number or rule that is not given to you below.\n\n` +
+        `FACTS ABOUT THE REALM, treat these as ground truth, not the general internet's idea of a social app:\n` +
+        `- You are speaking with ${me.handle}, currently a ${me.rank} with ${me.renown ?? 0} Renown ` +
+        `(Renown is private, visible only to them).${climbFact}\n` +
+        `- Rank thresholds by total Renown: ${thresholdFacts}. Monarch is not reached by Renown at all, ` +
+        `it is won weekly (see below).\n` +
+        `- CRITICAL, this surprises people because it is the opposite of most apps: posting a Tiding, ` +
+        `replying, voting on a poll, and cheering someone ELSE's tiding all earn the ACTOR nothing. The ` +
+        `ONLY two ways to earn Renown are (1) someone else cheers YOUR tiding or reply (+${RENOWN.cheerReceived}), ` +
+        `or (2) heeding the Monarch's Decree once per day. Being active does not, by itself, earn Renown.\n` +
+        `- ${crownFact} ${decreeFact} A Monarch's reign lasts 7 real days from the moment they were crowned.\n` +
+        `- Champion (Knight or higher): lifts a tiding to the top of the Tavern for 6 hours, once per day.\n` +
+        `- Proclaim (Noble or higher): pins a tiding kingdom-wide until proclaimed again, once per day.\n` +
+        `- Bounty (Noble or higher): grants a random ${RENOWN.bountyMin}-${RENOWN.bountyMax} Renown to a ` +
+        `Peasant of their choosing, once per day.\n` +
+        `- Terms: Tiding = a post, Cheer = a like, Reply = a comment, Raven/Rookery = direct messages ` +
+        `(same rank talk freely; reaching UP needs the higher rank to accept an Audience; reaching DOWN ` +
+        `costs the sender a daily Summons token; the other side's first reply always opens the channel ` +
+        `permanently), Crest = a profile.\n\n` +
+        `If asked something with no real answer here (idle chat, riddles, general knowledge), just answer ` +
+        `normally in character -- you are not limited to only talking about the app.` +
         (historyText ? `\n\nRecent conversation:\n${historyText}\n` : "\n") +
         `\n${me.handle}: ${question}\nOracle:`;
 

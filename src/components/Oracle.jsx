@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Loader2, Send, Wand2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Send, Wand2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { notify } from "@/lib/toast";
+import { useVisualViewport } from "@/lib/useVisualViewport";
 import { cn } from "@/lib/utils";
 
 const STARTERS = [
@@ -12,17 +13,22 @@ const STARTERS = [
 
 /**
  * The Oracle: Ascend's own answer to X's Grok, an AI advisor built into the
- * realm. Conversation lives only in this component's state, on purpose --
- * nothing is persisted server-side, the backend just needs the last few
- * turns for context. Rate-limited server-side (20/day), enforced by the
- * oracle function itself; this view just reflects the count it reports back.
+ * realm. A fixed full-screen overlay, same structural pattern (and the same
+ * useVisualViewport fix) as the Rookery's own conversation view: a plain
+ * `100vh`-ish in-flow layout is what put the input too low on mobile in the
+ * first place, since it does not shrink to the real visible area once the
+ * keyboard opens. Conversation lives only in this component's state, on
+ * purpose -- nothing is persisted server-side, the backend just needs the
+ * last few turns for context. Rate-limited server-side (20/day), enforced by
+ * the oracle function itself; this view just reflects the count it reports.
  */
-export function Oracle({ me }) {
+export function Oracle({ me, onBack }) {
   const [messages, setMessages] = useState([]); // { role: "user" | "oracle", content }
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState(null); // { used, limit } once known
   const scrollRef = useRef(null);
+  const { height, offsetTop } = useVisualViewport();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -53,22 +59,30 @@ export function Oracle({ me }) {
   const atLimit = usage && usage.used >= usage.limit;
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col px-4 py-5 sm:h-[calc(100vh-6rem)]">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/30">
-            <Wand2 className="h-4 w-4 text-primary" />
+    <div
+      className="fixed inset-x-0 z-40 mx-auto flex max-w-[600px] flex-col bg-background"
+      style={{ top: offsetTop, height }}
+    >
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/30">
+              <Wand2 className="h-4 w-4 text-primary" />
+            </div>
+            <span className="font-display text-lg font-bold text-primary">The Oracle</span>
           </div>
-          <h2 className="font-display text-xl font-bold text-primary">The Oracle</h2>
         </div>
         {usage && (
-          <span className="tnum text-xs text-muted-foreground">
+          <span className="tnum shrink-0 text-xs text-muted-foreground">
             {usage.used}/{usage.limit} today
           </span>
         )}
-      </div>
+      </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/30 p-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
             <Sparkles className="h-6 w-6 text-primary/70" />
@@ -119,7 +133,8 @@ export function Oracle({ me }) {
           e.preventDefault();
           ask(draft);
         }}
-        className="mt-3 flex shrink-0 items-center gap-2"
+        className="flex shrink-0 items-center gap-2 border-t border-border bg-background px-4 py-3"
+        style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
       >
         <input
           value={draft}

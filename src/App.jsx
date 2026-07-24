@@ -704,11 +704,7 @@ export default function App() {
         </div>
       )}
 
-      {view === "oracle" && me && (
-        <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
-          <Oracle me={me} />
-        </div>
-      )}
+      {view === "oracle" && me && <Oracle me={me} onBack={() => setView("tavern")} />}
 
       {/* Deep-linked from a notification: the tiding itself (and, for a
           cheer/reply on a specific reply, that exact reply's thread), not
