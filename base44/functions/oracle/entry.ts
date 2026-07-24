@@ -1,10 +1,13 @@
 // oracle: Ascend's own answer to X's Grok -- a wise advisor built into the
-// realm, ask it anything. One action ("ask"), rate-limited per subject per
-// day (server-enforced, same cooldown-field pattern as everything else in
-// this app) so one enthusiastic peasant cannot spend the whole realm's AI
-// budget alone. Conversation history is NOT persisted server-side: the
-// client keeps it for the session, the Oracle just needs the last few turns
-// to stay coherent.
+// realm, ask it anything. Rate-limited per subject per day (server-enforced,
+// same cooldown-field pattern as everything else in this app) so one
+// enthusiastic peasant cannot spend the whole realm's AI budget alone.
+//
+// Two actions: "ask" (question in, answer out, both turns saved) and
+// "history" (the last 48 hours of this subject's own turns, for the client
+// to restore the conversation on load). Memory is short-term by design: kept
+// long enough to survive a reload or a same-day return visit, pruned lazily
+// after that, see MEMORY_MS and loadAndPruneMessages.
 
 import { createClientFromRequest } from "npm:@base44/sdk";
 import {
@@ -62,9 +65,39 @@ function pickOpener(): string {
 }
 
 const DAILY_LIMIT = 20;
+const MEMORY_MS = 48 * 60 * 60 * 1000; // how long the Oracle remembers a conversation
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Loads this subject's remembered turns and, in the same pass, deletes
+// anything older than the memory window. There is no native scheduler on
+// this platform, so cleanup happens lazily whenever the conversation is
+// touched -- the same reason the Crown re-crowns lazily instead of on a
+// timer. Returns oldest-first, ready to hydrate a chat view.
+async function loadAndPruneMessages(svc: any, subjectId: string) {
+  const rows = await svc.entities.OracleMessage.filter({ subject_id: subjectId }, "-created_date", 200);
+  const cutoff = Date.now() - MEMORY_MS;
+  const fresh: any[] = [];
+  const stale: any[] = [];
+  for (const r of rows) {
+    if (new Date(r.created_date).getTime() < cutoff) stale.push(r);
+    else fresh.push(r);
+  }
+  if (stale.length) {
+    await Promise.all(stale.map((r) => svc.entities.OracleMessage.delete(r.id).catch(() => {})));
+  }
+  return fresh.reverse();
+}
+
+async function saveTurn(svc: any, me: any, role: "user" | "oracle", content: string) {
+  await svc.entities.OracleMessage.create({
+    subject_id: me.id,
+    user_email: me.user_email,
+    role,
+    content: content.slice(0, 800),
+  }).catch(() => {});
 }
 
 Deno.serve(async (req) => {
@@ -92,6 +125,15 @@ Deno.serve(async (req) => {
   if (!me) return json({ error: "Enter the realm first." }, 400);
 
   try {
+    // Short-term memory: the last 48 hours of this subject's own turns, so
+    // reopening the Oracle (a reload, a new tab, tomorrow morning) picks the
+    // conversation back up instead of starting blank. Older turns are
+    // pruned in the same call, see loadAndPruneMessages.
+    if (payload.action === "history") {
+      const fresh = await loadAndPruneMessages(svc, me.id);
+      return json({ messages: fresh.map((r: any) => ({ role: r.role, content: r.content })) });
+    }
+
     if (payload.action === "ask") {
       const question = (payload.message || "").toString().trim().slice(0, 500);
       if (!question) return json({ error: "Ask the Oracle something." }, 400);
@@ -187,6 +229,8 @@ Deno.serve(async (req) => {
           const answer = `${pickOpener()}${webFact}`.trim().slice(0, 800);
           const newUsed = used + 1;
           await svc.entities.Subject.update(me.id, { oracle_day: today, oracle_used: newUsed });
+          await saveTurn(svc, me, "user", question);
+          await saveTurn(svc, me, "oracle", answer);
           return json({ answer, used: newUsed, limit: DAILY_LIMIT });
         }
       }
@@ -236,6 +280,8 @@ Deno.serve(async (req) => {
 
       const newUsed = used + 1;
       await svc.entities.Subject.update(me.id, { oracle_day: today, oracle_used: newUsed });
+      await saveTurn(svc, me, "user", question);
+      await saveTurn(svc, me, "oracle", answer);
 
       return json({ answer, used: newUsed, limit: DAILY_LIMIT });
     }

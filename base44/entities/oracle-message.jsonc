@@ -1,0 +1,39 @@
+// OracleMessage: one turn of a subject's private conversation with the
+// Oracle. Short-term memory only: kept 48 hours so a reload or a return
+// visit picks the conversation back up, then the oracle function itself
+// lazily deletes anything older (no native scheduler on this platform, same
+// pattern as the Crown's lazy weekly re-crown). Never read or written
+// directly by the client -- entirely mediated by the oracle function, which
+// uses the service role, so RLS denies ordinary access outright.
+{
+  "name": "OracleMessage",
+  "type": "object",
+  "properties": {
+    "subject_id": {
+      "type": "string",
+      "description": "Whose conversation this turn belongs to.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "user_email": {
+      "type": "string",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "role": {
+      "type": "string",
+      "enum": ["user", "oracle"],
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "content": {
+      "type": "string",
+      "maxLength": 800,
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    }
+  },
+  "required": ["subject_id", "user_email", "role", "content"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": false,
+    "update": false,
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

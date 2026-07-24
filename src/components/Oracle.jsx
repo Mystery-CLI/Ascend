@@ -17,18 +17,38 @@ const STARTERS = [
  * useVisualViewport fix) as the Rookery's own conversation view: a plain
  * `100vh`-ish in-flow layout is what put the input too low on mobile in the
  * first place, since it does not shrink to the real visible area once the
- * keyboard opens. Conversation lives only in this component's state, on
- * purpose -- nothing is persisted server-side, the backend just needs the
- * last few turns for context. Rate-limited server-side (20/day), enforced by
- * the oracle function itself; this view just reflects the count it reports.
+ * keyboard opens. The conversation is short-term memory, not a permanent
+ * transcript: the server keeps the last 48 hours of it, so reopening this
+ * view picks a same-day (or overnight) conversation back up instead of
+ * starting blank, then quietly forgets it. Rate-limited server-side
+ * (20/day), enforced by the oracle function itself; this view just reflects
+ * the count it reports.
  */
 export function Oracle({ me, onBack }) {
   const [messages, setMessages] = useState([]); // { role: "user" | "oracle", content }
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState(null); // { used, limit } once known
   const scrollRef = useRef(null);
   const { height, offsetTop } = useVisualViewport();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await base44.functions.invoke("oracle", { action: "history" });
+        if (!cancelled) setMessages(res.data.messages || []);
+      } catch {
+        /* start blank; a fresh conversation is a fine fallback */
+      } finally {
+        if (!cancelled) setLoadingHistory(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -83,7 +103,11 @@ export function Oracle({ me, onBack }) {
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
-        {messages.length === 0 ? (
+        {loadingHistory ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
             <Sparkles className="h-6 w-6 text-primary/70" />
             <p className="max-w-xs text-sm text-muted-foreground">
