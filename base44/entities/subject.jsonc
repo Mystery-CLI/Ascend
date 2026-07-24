@@ -16,8 +16,14 @@
     },
     "handle": {
       "type": "string",
-      "description": "The name shown throughout the realm",
+      "description": "The display name shown throughout the realm. Not unique, like X's name field.",
       "maxLength": 24
+    },
+    "username": {
+      "type": "string",
+      "description": "The unique @handle (lowercase letters/numbers/underscore, 3-20 chars), X-style. Server-set only: the realm function checks uniqueness before writing it, a raw client write could skip that check.",
+      "maxLength": 20,
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
     },
     "avatar_url": {
       "type": "string",

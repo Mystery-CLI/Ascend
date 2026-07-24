@@ -30,6 +30,38 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Usernames are X-style: unique, lowercase, letters/numbers/underscore only.
+// The entity's own RLS makes `username` server-write-only (same treatment as
+// rank/renown), so this is the only path that can ever set one -- a raw
+// client-side Subject.update() cannot skip the uniqueness check below it.
+const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+
+function slugifyUsername(seed: string): string {
+  const slug = (seed || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20);
+  return slug.length >= 3 ? slug : (slug + "citizen").slice(0, 20);
+}
+
+async function usernameTaken(svc: any, username: string, excludeId?: string): Promise<boolean> {
+  const rows = await svc.entities.Subject.filter({ username });
+  return rows.some((s: any) => s.id !== excludeId);
+}
+
+// Used only to mint a starting username automatically (at signup, or backfilled
+// for an account that predates this feature) so no one is ever blocked from
+// entering the realm waiting on a name choice. They can change it any time
+// from their crest, where the live checker lives.
+async function uniqueUsernameFrom(svc: any, seed: string): Promise<string> {
+  const base = slugifyUsername(seed);
+  let candidate = base;
+  let n = 0;
+  while (await usernameTaken(svc, candidate)) {
+    n++;
+    const suffix = String(n);
+    candidate = base.slice(0, 20 - suffix.length) + suffix;
+  }
+  return candidate;
+}
+
 // The Decree is chosen from a fixed list, not typed freely, because each one
 // maps to something the server can actually check happened. That is what
 // closes the old loophole: Heed used to just be a button that paid out on
@@ -95,9 +127,11 @@ Deno.serve(async (req) => {
         const handleSeed = (user.full_name || user.email.split("@")[0] || "Wanderer")
           .toString()
           .slice(0, 24);
+        const username = await uniqueUsernameFrom(svc, user.email.split("@")[0] || handleSeed);
         subject = await svc.entities.Subject.create({
           user_email: user.email,
           handle: handleSeed,
+          username,
           avatar_url: "",
           bio: "",
           rank: "peasant",
@@ -105,6 +139,11 @@ Deno.serve(async (req) => {
           summons_tokens: 0,
           is_ai: false,
         });
+      } else if (!subject.username) {
+        // Backfill: this subject predates the username field.
+        const username = await uniqueUsernameFrom(svc, subject.handle || user.email.split("@")[0]);
+        const patch = await svc.entities.Subject.update(subject.id, { username });
+        subject = { ...subject, ...patch, username };
       }
       return json({ subject });
     }
@@ -112,6 +151,33 @@ Deno.serve(async (req) => {
     // All remaining actions require the caller to already be a subject.
     const me = await findSubjectByEmail(svc, user.email);
     if (!me) return json({ error: "Enter the realm first." }, 400);
+
+    // -- check_username: live availability check, X-style ---------------------
+    if (action === "check_username") {
+      const raw = (payload.username || "").toString().trim().toLowerCase();
+      if (!USERNAME_RE.test(raw)) {
+        return json({
+          available: false,
+          reason: "3-20 characters: lowercase letters, numbers, underscore only.",
+        });
+      }
+      if (raw === me.username) return json({ available: true, reason: null }); // your own, unchanged
+      const taken = await usernameTaken(svc, raw, me.id);
+      return json({ available: !taken, reason: taken ? "That username is already taken." : null });
+    }
+
+    // -- set_username: the only path that may actually write it ---------------
+    if (action === "set_username") {
+      const raw = (payload.username || "").toString().trim().toLowerCase();
+      if (!USERNAME_RE.test(raw)) {
+        return json({ error: "Usernames are 3-20 characters: lowercase letters, numbers, underscore only." }, 400);
+      }
+      if (raw !== me.username && (await usernameTaken(svc, raw, me.id))) {
+        return json({ error: "That username is already taken." }, 409);
+      }
+      await svc.entities.Subject.update(me.id, { username: raw });
+      return json({ ok: true, username: raw });
+    }
 
     // -- post ----------------------------------------------------------------
     if (action === "post") {

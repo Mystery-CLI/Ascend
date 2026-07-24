@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Loader2, Camera, LogOut, Mail, Feather } from "lucide-react";
+import { ArrowLeft, Loader2, Camera, LogOut, Mail, Feather, Check, X as XIcon } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { realm } from "@/lib/realm";
 import { RankBadge } from "@/components/RankBadge";
 import { TidingCard } from "@/components/TidingCard";
 import { rankMeta, climbProgress } from "@/lib/ranks";
 import { notify } from "@/lib/toast";
-import { uploadErrorMessage } from "@/lib/utils";
+import { uploadErrorMessage, cn } from "@/lib/utils";
 
 /**
  * A crest page, X-style: tapping ANY handle or avatar in the realm lands here.
@@ -101,6 +102,9 @@ export function Profile({
               <span className="font-display text-xl font-bold">{target?.handle}</span>
               <RankBadge rank={target?.rank} size="lg" showLabel={false} />
             </div>
+            {target?.username && (
+              <span className="text-sm text-muted-foreground">@{target.username}</span>
+            )}
 
             {target?.bio && (
               <p className="mt-1.5 max-w-xs text-center text-sm text-muted-foreground">{target.bio}</p>
@@ -206,11 +210,45 @@ function EditForm({ me, onDone, onUpdated }) {
   const [handle, setHandle] = useState(me?.handle || "");
   const [bio, setBio] = useState(me?.bio || "");
   const [avatarUrl, setAvatarUrl] = useState(me?.avatar_url || "");
+  const [username, setUsername] = useState(me?.username || "");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Live availability check, X-style: debounced, only fires when the
+  // username actually differs from what's already yours.
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState(null); // { available, reason } | null
+  const checkTimer = useRef(null);
+  const usernameChanged = username.trim().toLowerCase() !== (me?.username || "");
+
+  useEffect(() => {
+    clearTimeout(checkTimer.current);
+    if (!usernameChanged) {
+      setChecking(false);
+      setCheckResult(null);
+      return;
+    }
+    setChecking(true);
+    checkTimer.current = setTimeout(async () => {
+      try {
+        const res = await realm("check_username", { username: username.trim().toLowerCase() });
+        setCheckResult(res);
+      } catch {
+        setCheckResult({ available: false, reason: "Could not check right now." });
+      } finally {
+        setChecking(false);
+      }
+    }, 400);
+    return () => clearTimeout(checkTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username]);
+
   const dirty =
-    handle !== (me?.handle || "") || bio !== (me?.bio || "") || avatarUrl !== (me?.avatar_url || "");
+    handle !== (me?.handle || "") ||
+    bio !== (me?.bio || "") ||
+    avatarUrl !== (me?.avatar_url || "") ||
+    usernameChanged;
+  const usernameBlocksSave = usernameChanged && (checking || !checkResult?.available);
 
   const onAvatarFile = async (e) => {
     const file = e.target.files?.[0];
@@ -231,15 +269,20 @@ function EditForm({ me, onDone, onUpdated }) {
   const save = async () => {
     const trimmedHandle = handle.trim().slice(0, 24);
     if (!trimmedHandle) return notify("Your name cannot be empty.");
+    const trimmedUsername = username.trim().toLowerCase();
+    if (usernameBlocksSave) return notify("Choose an available username first.");
     setSaving(true);
     try {
+      if (usernameChanged) {
+        await realm("set_username", { username: trimmedUsername });
+      }
       const trimmedBio = bio.trim().slice(0, 160);
       await base44.entities.Subject.update(me.id, {
         handle: trimmedHandle,
         bio: trimmedBio,
         avatar_url: avatarUrl,
       });
-      onUpdated?.({ handle: trimmedHandle, bio: trimmedBio, avatar_url: avatarUrl });
+      onUpdated?.({ handle: trimmedHandle, bio: trimmedBio, avatar_url: avatarUrl, username: trimmedUsername });
       notify("Crest updated.", "success");
       onDone();
     } catch (err) {
@@ -287,6 +330,42 @@ function EditForm({ me, onDone, onUpdated }) {
           />
         </label>
         <label className="block">
+          <span className="mb-1 block text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Username
+          </span>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+              @
+            </span>
+            <input
+              value={username}
+              onChange={(e) =>
+                setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20))
+              }
+              placeholder="username"
+              className={cn(
+                "h-11 w-full rounded-xl border bg-background/60 pl-7 pr-9 text-sm focus:outline-none",
+                usernameChanged && checkResult && !checkResult.available
+                  ? "border-destructive/60 focus:border-destructive"
+                  : "border-border focus:border-primary/60"
+              )}
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2">
+              {usernameChanged &&
+                (checking ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                ) : checkResult?.available ? (
+                  <Check className="h-4 w-4 text-primary" />
+                ) : checkResult ? (
+                  <XIcon className="h-4 w-4 text-destructive" />
+                ) : null)}
+            </span>
+          </div>
+          {usernameChanged && checkResult?.reason && (
+            <p className="mt-1 text-[11px] text-destructive">{checkResult.reason}</p>
+          )}
+        </label>
+        <label className="block">
           <span className="mb-1 block text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Bio</span>
           <textarea
             value={bio}
@@ -306,7 +385,7 @@ function EditForm({ me, onDone, onUpdated }) {
           </button>
           <button
             onClick={save}
-            disabled={saving || uploading || !dirty}
+            disabled={saving || uploading || !dirty || usernameBlocksSave}
             className="h-11 flex-1 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:opacity-50"
           >
             {saving ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Save changes"}
