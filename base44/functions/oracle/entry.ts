@@ -28,6 +28,27 @@ function cap(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
+// Direct testing found that `add_context_from_internet` is reliably accurate
+// on a short, clean, standalone question, but silently gets ignored (the
+// model falls back to stale training knowledge instead) once it is buried
+// inside the Oracle's long character-voiced prompt below. So general-world
+// questions get grounded with a SEPARATE short call first, and that answer
+// is handed to the Oracle as a fact instead of relying on the big prompt to
+// trigger grounding itself. This costs a second integration credit, so it is
+// skipped for anything that looks like it's actually about the realm --
+// a deliberately generous, keyword-based guess, not a precise classifier;
+// worst case a realm question also gets a (harmless, ignorable) web lookup.
+const REALM_TERMS = [
+  "renown", "tiding", "cheer", "decree", "rookery", "raven", "summons",
+  "audience", "crest", "champion", "proclaim", "bounty", "peasant",
+  "freeman", "knight", "noble", "monarch", "realm", "ascend", "kingdom",
+  "throne", "crown", "reign", "tavern", "oracle",
+];
+function isAboutTheRealm(question: string): boolean {
+  const q = question.toLowerCase();
+  return REALM_TERMS.some((t) => q.includes(t));
+}
+
 const DAILY_LIMIT = 20;
 
 function todayStr() {
@@ -115,11 +136,51 @@ Deno.serve(async (req) => {
         .map((t) => `${cap(t.rank)} at ${t.at}`)
         .join(", ");
 
+      // The real, current date -- injected as a plain fact rather than left
+      // for the model to guess at, since an LLM has no innate sense of
+      // "today" and internet-search grounding alone is not reliable enough
+      // for something this basic.
+      const todayFact = new Date().toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+
+      // A clean, standalone, internet-grounded pre-fetch for anything that
+      // is not about the realm itself -- see the comment on isAboutTheRealm
+      // for why this is a separate call rather than one big prompt.
+      let webFact = "";
+      if (!isAboutTheRealm(question)) {
+        try {
+          const factRaw = await ai.InvokeLLM({
+            prompt: `Answer factually, precisely, and concisely (1-3 sentences), using current ` +
+              `real-world information: ${question}`,
+            add_context_from_internet: true,
+          });
+          webFact = (typeof factRaw === "string" ? factRaw : factRaw?.toString() || "").trim().slice(0, 600);
+        } catch {
+          // Grounding failed; the Oracle still answers from its own
+          // knowledge below, just without a fresh-facts boost.
+        }
+      }
+
       const prompt =
         `You are the Oracle of Ascend, a wise, warm, faintly mystical advisor built into a medieval-fantasy ` +
         `social kingdom app. Speak briefly (2-4 sentences), with a touch of old-world flavour, but stay ` +
         `genuinely clear and useful -- never let the voice get in the way of the answer, and never invent a ` +
-        `number or rule that is not given to you below.\n\n` +
+        `number or rule that is not given to you below. Never use an em dash ("—") in your reply; use a ` +
+        `period, comma, or parentheses instead.\n\n` +
+        `Today's real date is ${todayFact}. For anything beyond the realm itself -- current events, ` +
+        `general knowledge, facts about the real world -- actually answer directly and in character, ` +
+        `rather than deflecting or pleading ignorance.` +
+        (webFact
+          ? ` For THIS question specifically, up-to-date real-world information has already been ` +
+            `looked up for you: "${webFact}" -- trust this over anything you already "know," your own ` +
+            `training data is very likely stale for anything that changes over time (who holds an ` +
+            `office, current leaders, prices, recent events).`
+          : "") +
+        `\n\n` +
         `FACTS ABOUT THE REALM, treat these as ground truth, not the general internet's idea of a social app:\n` +
         `- You are speaking with ${me.handle}, currently a ${me.rank} with ${me.renown ?? 0} Renown ` +
         `(Renown is private, visible only to them).${climbFact}\n` +
@@ -138,12 +199,12 @@ Deno.serve(async (req) => {
         `(same rank talk freely; reaching UP needs the higher rank to accept an Audience; reaching DOWN ` +
         `costs the sender a daily Summons token; the other side's first reply always opens the channel ` +
         `permanently), Crest = a profile.\n\n` +
-        `If asked something with no real answer here (idle chat, riddles, general knowledge), just answer ` +
-        `normally in character -- you are not limited to only talking about the app.` +
+        `If asked something with no real answer here (idle chat, riddles, general knowledge, current events), ` +
+        `just answer normally and directly in character -- you are not limited to only talking about the app.` +
         (historyText ? `\n\nRecent conversation:\n${historyText}\n` : "\n") +
         `\n${me.handle}: ${question}\nOracle:`;
 
-      const raw = await ai.InvokeLLM({ prompt });
+      const raw = await ai.InvokeLLM({ prompt, add_context_from_internet: true });
       const answer = (typeof raw === "string" ? raw : raw?.toString() || "").trim().slice(0, 800);
       if (!answer) return json({ error: "The Oracle has no words. Try asking again." }, 500);
 
