@@ -15,6 +15,7 @@ import {
   weekKey,
   effectiveWeekRenown,
   findSubjectByEmail,
+  notify,
   jsonResponse as json,
 } from "../../shared/renown.ts";
 
@@ -88,6 +89,15 @@ Deno.serve(async (req) => {
         crown = crown
           ? { ...crown, ...(await svc.entities.Crown.update(crown.id, fields)) }
           : await svc.entities.Crown.create(fields);
+        await notify(
+          svc,
+          leader.user_email,
+          leader.id,
+          undefined,
+          "The Crown",
+          "crowned",
+          "You have been crowned Monarch of the realm!"
+        );
         // update() may return only the patch; keep our merged view consistent
         crown = { ...crown, ...fields };
       } else if (crown?.monarch_id) {

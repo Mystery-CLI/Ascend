@@ -101,3 +101,29 @@ export function jsonResponse(body: unknown, status = 200) {
     headers: { "content-type": "application/json" },
   });
 }
+
+// One shared notifier for both realm (cheers, replies, powers) and crown
+// (being crowned): a self-notification is silently skipped, everything else
+// becomes a row the recipient will see on their own, next time they check.
+export async function notify(
+  svc: any,
+  recipientEmail: string | undefined,
+  recipientSubjectId: string | undefined,
+  actorId: string | undefined,
+  actorHandle: string,
+  kind: string,
+  body: string,
+  tidingId?: string
+) {
+  if (!recipientEmail || recipientSubjectId === actorId) return;
+  await svc.entities.Notification.create({
+    recipient_email: recipientEmail,
+    recipient_subject_id: recipientSubjectId,
+    actor_handle: actorHandle,
+    actor_subject_id: actorId,
+    kind,
+    body,
+    tiding_id: tidingId,
+    read: false,
+  });
+}

@@ -14,6 +14,7 @@ import {
   rankOrder,
   adjustRenown,
   findSubjectByEmail,
+  notify,
   jsonResponse as json,
 } from "../../shared/renown.ts";
 
@@ -271,6 +272,16 @@ Deno.serve(async (req) => {
         });
         if (reply.author_subject_id && reply.author_subject_id !== me.id) {
           await adjustRenown(svc, reply.author_subject_id, RENOWN.cheerReceived);
+          await notify(
+            svc,
+            reply.author_email,
+            reply.author_subject_id,
+            me.id,
+            me.handle,
+            "cheer_reply",
+            `${me.handle} cheered your reply.`,
+            reply.tiding_id
+          );
         }
         // Cheering earns the cheerer nothing; only being cheered pays out.
         return json({ cheered: true, renown: me.renown, rank: me.rank });
@@ -305,6 +316,16 @@ Deno.serve(async (req) => {
       });
       if (tiding.author_subject_id && tiding.author_subject_id !== me.id) {
         await adjustRenown(svc, tiding.author_subject_id, RENOWN.cheerReceived);
+        await notify(
+          svc,
+          tiding.author_email,
+          tiding.author_subject_id,
+          me.id,
+          me.handle,
+          "cheer_tiding",
+          `${me.handle} cheered your tiding.`,
+          tiding.id
+        );
       }
       return json({ cheered: true, renown: me.renown, rank: me.rank });
     }
@@ -320,8 +341,9 @@ Deno.serve(async (req) => {
       const tiding = await svc.entities.Tiding.get(tidingId);
       if (!tiding) return json({ error: "No such tiding." }, 404);
 
+      let parent: any = null;
       if (parentReplyId) {
-        const parent = await svc.entities.Reply.get(parentReplyId);
+        parent = await svc.entities.Reply.get(parentReplyId);
         if (!parent || parent.tiding_id !== tidingId) {
           return json({ error: "No such reply." }, 404);
         }
@@ -336,6 +358,31 @@ Deno.serve(async (req) => {
         body,
         cheers_count: 0,
       });
+      // A reply to a reply notifies that reply's author; a top-level reply
+      // notifies the tiding's author. Never both, matching how X threads it.
+      if (parent) {
+        await notify(
+          svc,
+          parent.author_email,
+          parent.author_subject_id,
+          me.id,
+          me.handle,
+          "reply_reply",
+          `${me.handle} replied to your reply.`,
+          tidingId
+        );
+      } else {
+        await notify(
+          svc,
+          tiding.author_email,
+          tiding.author_subject_id,
+          me.id,
+          me.handle,
+          "reply_tiding",
+          `${me.handle} replied to your tiding.`,
+          tidingId
+        );
+      }
       await svc.entities.Tiding.update(tidingId, {
         replies_count: (tiding.replies_count || 0) + 1,
       });
@@ -392,6 +439,16 @@ Deno.serve(async (req) => {
       const until = new Date(Date.now() + CHAMPION_HOURS * 3600 * 1000).toISOString();
       await svc.entities.Tiding.update(tiding.id, { championed_until: until });
       await svc.entities.Subject.update(me.id, { last_champion_at: new Date().toISOString() });
+      await notify(
+        svc,
+        tiding.author_email,
+        tiding.author_subject_id,
+        me.id,
+        me.handle,
+        "champion",
+        `${me.handle} Championed your tiding.`,
+        tiding.id
+      );
       return json({ championed_until: until });
     }
 
@@ -408,6 +465,16 @@ Deno.serve(async (req) => {
 
       await svc.entities.Tiding.update(tiding.id, { proclaimed: true });
       await svc.entities.Subject.update(me.id, { last_proclaim_at: new Date().toISOString() });
+      await notify(
+        svc,
+        tiding.author_email,
+        tiding.author_subject_id,
+        me.id,
+        me.handle,
+        "proclaim",
+        `${me.handle} Proclaimed your tiding to the realm.`,
+        tiding.id
+      );
       return json({ proclaimed: true });
     }
 
@@ -430,6 +497,15 @@ Deno.serve(async (req) => {
         RENOWN.bountyMin + Math.floor(Math.random() * (RENOWN.bountyMax - RENOWN.bountyMin + 1));
       const after = await adjustRenown(svc, target.id, amount);
       await svc.entities.Subject.update(me.id, { last_bounty_at: new Date().toISOString() });
+      await notify(
+        svc,
+        target.user_email,
+        target.id,
+        me.id,
+        me.handle,
+        "bounty",
+        `${me.handle} granted you a Bounty of ${amount} renown.`
+      );
       return json({ granted: amount, target_rank: after?.rank });
     }
 

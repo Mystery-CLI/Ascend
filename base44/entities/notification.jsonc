@@ -1,0 +1,68 @@
+// Notification: something happened involving you. X-style: a cheer, a reply,
+// a rank power used on your tiding, a bounty, or being crowned.
+//
+// Server-created only (the realm/crown functions are the only ones that know
+// a real event happened), same field-locking pattern as Subject's rank/renown:
+// the recipient may read their own and flip `read` true, but cannot touch
+// anything else, so a client can never forge or edit a notification.
+{
+  "name": "Notification",
+  "type": "object",
+  "properties": {
+    "recipient_email": {
+      "type": "string",
+      "description": "Who this is for. Used to find your own notifications.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "recipient_subject_id": {
+      "type": "string",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "actor_handle": {
+      "type": "string",
+      "description": "Who did the thing, for display.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "actor_subject_id": {
+      "type": "string",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "cheer_tiding",
+        "cheer_reply",
+        "reply_tiding",
+        "reply_reply",
+        "champion",
+        "proclaim",
+        "bounty",
+        "crowned"
+      ],
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 140,
+      "description": "Pre-rendered display text, e.g. \"Stellar cheered your tiding.\"",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "tiding_id": {
+      "type": "string",
+      "description": "The tiding this is about, if any.",
+      "rls": { "write": { "user_condition": { "role": "admin" } } }
+    },
+    "read": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the recipient has seen this. The recipient may set this true themselves."
+    }
+  },
+  "required": ["recipient_email", "body"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": { "data.recipient_email": "{{user.email}}" },
+    "update": { "data.recipient_email": "{{user.email}}" },
+    "delete": false
+  }
+}

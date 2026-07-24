@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Crown, Loader2, ScrollText, Sparkles, ScrollText as Scroll, Feather, User } from "lucide-react";
+import {
+  Crown,
+  Loader2,
+  ScrollText,
+  Sparkles,
+  ScrollText as Scroll,
+  Feather,
+  User,
+  Bell,
+  Search as SearchIcon,
+} from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { realm, pulse } from "@/lib/realm";
 import { hasFealty, markFealty, clearFealty } from "@/lib/session";
@@ -14,6 +24,8 @@ import { Composer } from "@/components/Composer";
 import { Rookery } from "@/components/Rookery";
 import { ThroneRoom } from "@/components/ThroneRoom";
 import { Profile } from "@/components/Profile";
+import { Notifications } from "@/components/Notifications";
+import { Search } from "@/components/Search";
 import { ToastHost } from "@/components/Toast";
 
 const FEED_LIMIT = 60;
@@ -37,6 +49,7 @@ export default function App() {
   const [view, setView] = useState("tavern"); // tavern | rookery | throne | profile
   const [ravenTarget, setRavenTarget] = useState(null); // subject to open a thread with
   const [profileSubjectId, setProfileSubjectId] = useState(null); // subject whose crest is showing
+  const [unreadCount, setUnreadCount] = useState(0);
   const meRef = useRef(null);
   meRef.current = me;
 
@@ -96,13 +109,15 @@ export default function App() {
 
     const mine = meRef.current;
     if (mine) {
-      const [cheers, votes] = await Promise.all([
+      const [cheers, votes, unread] = await Promise.all([
         base44.entities.Cheer.filter({ subject_id: mine.id }).catch(() => []),
         base44.entities.Vote.filter({ subject_id: mine.id }).catch(() => []),
+        base44.entities.Notification.filter({ recipient_email: mine.user_email, read: false }).catch(() => []),
       ]);
       setMyCheers(new Set(cheers.filter((c) => !c.reply_id).map((c) => c.tiding_id)));
       setMyReplyCheers(new Set(cheers.filter((c) => c.reply_id).map((c) => c.reply_id)));
       setMyVotes(new Map(votes.map((v) => [v.tiding_id, v.option_index])));
+      setUnreadCount(unread.length);
       // Refresh my own standing (renown is private but readable to me).
       const fresh = map[mine.id];
       if (fresh) setMe((prev) => ({ ...prev, ...fresh }));
@@ -427,8 +442,11 @@ export default function App() {
       {/* Desktop only: a left nav rail sits beside the content, X-style,
           instead of the same 600px column floating alone in empty margin.
           Hidden entirely below `lg`, so mobile/tablet render exactly as
-          before; the bottom nav further down takes over there instead. */}
-      <div className="mx-auto flex w-full max-w-4xl lg:items-start lg:gap-6">
+          before; the bottom nav further down takes over there instead. The
+          container only widens for the right sidebar at `xl`, so the
+          lg-to-xl range (left rail + content only) stays exactly as tight
+          as it was before the right column existed. */}
+      <div className="mx-auto flex w-full max-w-4xl lg:items-start lg:gap-6 xl:max-w-[1240px]">
         <aside className="hidden shrink-0 lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-56 lg:flex-col lg:py-6 lg:pl-2">
           <div className="flex items-center gap-2 px-3">
             <Crown className="h-6 w-6 text-primary" />
@@ -445,6 +463,15 @@ export default function App() {
               icon={Feather}
               label="Rookery"
             />
+            {me && (
+              <SidebarLink
+                active={view === "notifications"}
+                onClick={() => setView("notifications")}
+                icon={Bell}
+                label="Notifications"
+                badge={unreadCount}
+              />
+            )}
             {me && (
               <SidebarLink
                 active={view === "profile" && profileSubjectId === me.id}
@@ -465,24 +492,36 @@ export default function App() {
             <span className="font-display text-lg font-bold text-primary">Ascend</span>
           </div>
 
-          {me ? (
-            <button onClick={() => openProfile(me.id)} className="text-right" title="Your crest">
-              <div className="flex items-center justify-end gap-2">
-                <span className="max-w-[9rem] truncate text-sm font-medium">{me.handle}</span>
-                <RankBadge rank={me.rank} size="xs" />
-              </div>
-              <div className="tnum text-[11px] text-muted-foreground">
-                {me.renown ?? 0} renown
-              </div>
-            </button>
-          ) : (
+          <div className="flex items-center gap-1.5">
+            {/* The desktop right sidebar (xl+) already has a persistent search
+                box, so this icon is only needed below that breakpoint. */}
             <button
-              onClick={() => setGate({ reason: "Enter the realm a peasant, and begin your climb." })}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
+              onClick={() => setView("search")}
+              className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary hover:text-foreground xl:hidden"
+              title="Search the realm"
             >
-              Enter the realm
+              <SearchIcon className="h-5 w-5" />
             </button>
-          )}
+
+            {me ? (
+              <button onClick={() => openProfile(me.id)} className="text-right" title="Your crest">
+                <div className="flex items-center justify-end gap-2">
+                  <span className="max-w-[9rem] truncate text-sm font-medium">{me.handle}</span>
+                  <RankBadge rank={me.rank} size="xs" />
+                </div>
+                <div className="tnum text-[11px] text-muted-foreground">
+                  {me.renown ?? 0} renown
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={() => setGate({ reason: "Enter the realm a peasant, and begin your climb." })}
+                className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
+              >
+                Enter the realm
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Climb toward the next rank */}
@@ -605,7 +644,35 @@ export default function App() {
           />
         </div>
       )}
+
+      {view === "notifications" && me && (
+        <div className="mx-auto max-w-[600px] pb-20 sm:py-3">
+          <Notifications me={me} user={user} onOpenProfile={openProfile} />
         </div>
+      )}
+
+      {/* Mobile/tablet only: the desktop right sidebar below holds search
+          instead, always visible, X-style. This full-page version is what
+          the header's search icon opens under `xl`. */}
+      {view === "search" && (
+        <div className="mx-auto max-w-[600px] pb-20 xl:hidden">
+          <Search
+            variant="page"
+            subjects={subjects}
+            tidings={tidings}
+            onOpenProfile={openProfile}
+            onClose={() => setView("tavern")}
+          />
+        </div>
+      )}
+        </div>
+
+        {/* Desktop only, and only once there is room for a third column
+            (`xl`, wider than the left-rail breakpoint): a persistent search
+            box, X-style, filling what would otherwise be empty margin. */}
+        <aside className="hidden shrink-0 xl:block xl:sticky xl:top-0 xl:w-72 xl:py-6 xl:pr-2">
+          <Search variant="panel" subjects={subjects} tidings={tidings} onOpenProfile={openProfile} />
+        </aside>
       </div>
 
       {/* Bottom nav: mobile/tablet only, replaced by the sidebar above `lg`.
@@ -627,6 +694,15 @@ export default function App() {
           icon={Feather}
           label="Rookery"
         />
+        {me && (
+          <NavButton
+            active={view === "notifications"}
+            onClick={() => setView("notifications")}
+            icon={Bell}
+            label="Alerts"
+            badge={unreadCount}
+          />
+        )}
         <NavButton
           active={view === "profile" && profileSubjectId === me?.id}
           onClick={() => openProfile(me?.id)}
@@ -705,7 +781,7 @@ export default function App() {
 }
 
 /** The desktop nav rail's own item: icon and label side by side, X-style. */
-function SidebarLink({ active, onClick, icon: Icon, label }) {
+function SidebarLink({ active, onClick, icon: Icon, label, badge }) {
   return (
     <button
       onClick={onClick}
@@ -714,13 +790,20 @@ function SidebarLink({ active, onClick, icon: Icon, label }) {
         active ? "text-primary" : "text-foreground/90 hover:bg-secondary/60"
       )}
     >
-      <Icon className={cn("h-6 w-6", active && "fill-primary/10")} />
+      <span className="relative">
+        <Icon className={cn("h-6 w-6", active && "fill-primary/10")} />
+        {badge > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+            {badge > 9 ? "9+" : badge}
+          </span>
+        )}
+      </span>
       {label}
     </button>
   );
 }
 
-function NavButton({ active, onClick, icon: Icon, label }) {
+function NavButton({ active, onClick, icon: Icon, label, badge }) {
   return (
     <button
       onClick={onClick}
@@ -729,7 +812,14 @@ function NavButton({ active, onClick, icon: Icon, label }) {
         active ? "text-primary" : "text-muted-foreground hover:text-foreground"
       )}
     >
-      <Icon className={cn("h-5 w-5", active && "fill-primary/10")} />
+      <span className="relative">
+        <Icon className={cn("h-5 w-5", active && "fill-primary/10")} />
+        {badge > 0 && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[8px] font-bold text-primary-foreground">
+            {badge > 9 ? "9+" : badge}
+          </span>
+        )}
+      </span>
       {label}
     </button>
   );
